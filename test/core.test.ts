@@ -290,6 +290,47 @@ describe("sessions", async () => {
   });
 });
 
+describe("csv reader", async () => {
+  const { parseCsv } = await import("../src/providers/csv.js");
+  it("handles quotes, embedded newlines and blank lines", () => {
+    expect(parseCsv('﻿a,"b, c","say ""hi"""\r\n\r\n1,"two\nlines",3')).toEqual([
+      ["a", "b, c", 'say "hi"'],
+      ["1", "two\nlines", "3"],
+    ]);
+  });
+});
+
+describe("amex csv", async () => {
+  const { parseAmexCsv, amexDate } = await import("../src/providers/amex.js");
+  const fallback = { id: "amex", name: "Amex card", currency: "AUD" };
+  it("parses the extended export, flipping signs and splitting cards", () => {
+    const csv = [
+      "Date,Date Processed,Description,Card Member,Account #,Amount,Extended Details,Appears On Your Statement As,Address,Town/City,Postcode,Country,Reference,Category",
+      `03/10/2026,04/10/2026,WOOLWORTHS 1234 SYDNEY,A PERSON,-12345,"1,204.50","line one\nline two",WOOLWORTHS,"1 MAIN ST\nSYDNEY",,,,'AT2627700110000100',General Purchases-Groceries`,
+      `05/10/2026,05/10/2026,PAYMENT RECEIVED - THANK YOU,A PERSON,-12345,-500.00,,,,,,,'AT2627800220000200',`,
+      `06/10/2026,06/10/2026,CAFE,B PERSON,-67890,4.50,,,,,,,,`,
+    ].join("\n");
+    const out = parseAmexCsv(csv, fallback);
+    expect(out.map((t) => [t.account.id, t.date, t.amountCents, t.description, t.bankId])).toEqual([
+      ["amex-12345", "2026-10-03", -120450, "WOOLWORTHS 1234 SYDNEY", "AT2627700110000100"],
+      ["amex-12345", "2026-10-05", 50000, "PAYMENT RECEIVED - THANK YOU", "AT2627800220000200"],
+      ["amex-67890", "2026-10-06", -450, "CAFE", undefined],
+    ]);
+    expect(out[0]!.account).toBe(out[1]!.account);
+    expect(out[0]!.account.name).toBe("Amex ••12345");
+  });
+  it("uses the fallback account without an account column", () => {
+    const [t] = parseAmexCsv("Date,Description,Amount\n1/10/2026,UBER *TRIP,15.00\n", fallback);
+    expect(t).toMatchObject({ account: fallback, date: "2026-10-01", amountCents: -1500 });
+  });
+  it("reads other date styles and rejects junk", () => {
+    expect(amexDate("3 Oct 2026")).toBe("2026-10-03");
+    expect(amexDate("03 Sept. 2026")).toBe("2026-09-03");
+    expect(() => parseAmexCsv("Date,Description,Amount\nsoon,X,1.00", fallback)).toThrow(/bad date/);
+    expect(() => parseAmexCsv("what,is,this\n1,2,3", fallback)).toThrow(/header/);
+  });
+});
+
 describe("cancel", () => {
   it("stops a run waiting for an MFA code and marks it cancelled", async () => {
     const { MfaBroker } = await import("../src/mfa.js");
@@ -320,4 +361,27 @@ describe("cancel", () => {
     expect(run.status).toBe("cancelled");
     expect(run.log).toContain("CANCELLED");
   }, 30_000);
+});
+
+describe("amex remembered user id", async () => {
+  const { rememberedMatches } = await import("../src/providers/amex.js");
+  it("keeps a masked value that fits the username and rejects others", () => {
+    expect(rememberedMatches("Ta*****", "Tabitha1")).toBe(true);
+    expect(rememberedMatches("ta•••••1", "Tabitha1")).toBe(true);
+    expect(rememberedMatches("Bo*****", "Tabitha1")).toBe(false);
+    expect(rememberedMatches("Ta*****2", "Tabitha1")).toBe(false);
+    expect(rememberedMatches("Tabitha1", "Tabitha1")).toBe(true);
+    expect(rememberedMatches("Ta*****Tabitha1", "Tabitha1")).toBe(false);
+    expect(rememberedMatches("someoneelse", "Tabitha1")).toBe(false);
+  });
+});
+
+describe("sync period", async () => {
+  const { syncDays, syncLabel } = await import("../src/providers/index.js");
+  it("uses the connection's choice, else the bank default; Amex is fixed", () => {
+    expect(syncDays({ provider: "anz", lookbackDays: null })).toBe(14);
+    expect(syncDays({ provider: "anz", lookbackDays: 60 })).toBe(60);
+    expect(syncLabel({ provider: "anz", lookbackDays: 30 })).toBe("last 30 days");
+    expect(syncLabel({ provider: "amex", lookbackDays: 60 })).toBe("current statement");
+  });
 });

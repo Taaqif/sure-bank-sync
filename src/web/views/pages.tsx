@@ -191,7 +191,6 @@ export const SettingsPage = (p: { s: Settings; msg?: string; error?: string }) =
           <small>Used for schedules and "today", e.g. Australia/Melbourne.</small>
         </label>
         <ScheduleField name="schedule" label="Default schedule" value={p.s.schedule} />
-        <LookbackField name="lookbackDays" value={p.s.lookbackDays} />
         <label>
           MFA timeout (seconds)
           <input type="number" name="mfaTimeoutSeconds" value={String(p.s.mfaTimeoutSeconds)} min="30" max="3600" required />
@@ -337,11 +336,11 @@ export const UserPage = (p: { user: User; conns: Connection[]; msg?: string }) =
 
 // --- connections -----------------------------------------------------------
 
-function ScheduleFields(p: { conn?: Connection; settings: Settings }) {
+function ScheduleFields(p: { conn?: Connection; settings: Settings; provider?: ProviderDefinition }) {
   return (
     <>
       <ScheduleField name="schedule" label="Schedule" value={p.conn?.schedule ?? null} defaultCron={p.settings.schedule} />
-      <LookbackField name="lookbackDays" value={p.conn?.lookbackDays ?? null} defaultDays={p.settings.lookbackDays} />
+      {p.provider && <LookbackField name="lookbackDays" value={p.conn?.lookbackDays ?? null} period={p.provider.syncPeriod} />}
     </>
   );
 }
@@ -406,7 +405,7 @@ export const ConnectionNewPage = (p: {
           <label class="check">
             <input type="checkbox" name="enabled" checked /> Run on schedule
           </label>
-          <ScheduleFields settings={p.settings} />
+          <ScheduleFields settings={p.settings} provider={p.provider} />
           <details>
             <summary>Advanced</summary>
             <div class="stack" style="padding:12px 0 0">
@@ -523,7 +522,7 @@ export const ConnectionPage = (p: {
           <label class="check">
             <input type="checkbox" name="enabled" checked={p.conn.enabled} /> Run on schedule
           </label>
-          <ScheduleFields conn={p.conn} settings={p.settings} />
+          <ScheduleFields conn={p.conn} settings={p.settings} provider={p.provider} />
           <details>
             <summary>Advanced</summary>
             <div class="stack" style="padding:12px 0 0">

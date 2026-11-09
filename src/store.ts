@@ -45,7 +45,6 @@ export const SettingsSchema = z.object({
     .transform((s) => s || "sure-bank-sync"),
   timezone: z.string().trim().refine(validTimezone, "unknown timezone"),
   schedule: z.string(),
-  lookbackDays: z.coerce.number().int().min(1, "lookback days must be 1-365").max(365, "lookback days must be 1-365"),
   skipPending: z.boolean(),
   mfaTimeoutSeconds: z.coerce.number().int().min(30, "MFA timeout must be 30-3600s").max(3600, "MFA timeout must be 30-3600s"),
   /** never write to Sure; log what would have been sent */
@@ -60,7 +59,6 @@ export const DEFAULT_SETTINGS: Settings = {
   sureSource: "sure-bank-sync",
   timezone: "Australia/Melbourne",
   schedule: "0 6 * * *",
-  lookbackDays: 30,
   skipPending: true,
   mfaTimeoutSeconds: 300,
   dryRun: false,

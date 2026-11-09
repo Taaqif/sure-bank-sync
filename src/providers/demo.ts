@@ -26,6 +26,7 @@ export const demo: ProviderDefinition = {
   name: "demo",
   label: "Demo bank (testing)",
   credentialFields: [],
+  syncPeriod: { choices: [1, 3, 7, 14, 30], default: 7 },
   create: (ctx) => ({
     async login() {
       ctx.log("demo: logging in");

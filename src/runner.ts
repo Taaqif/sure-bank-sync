@@ -7,7 +7,7 @@ import { virtualDisplay } from "./display.js";
 import { MfaBroker } from "./mfa.js";
 import { RemoteHub } from "./remote.js";
 import type { BankTransaction } from "./models.js";
-import { PROVIDERS, ProviderError, snapshot, type DateRange, type ProviderContext } from "./providers/index.js";
+import { PROVIDERS, syncDays, ProviderError, snapshot, type DateRange, type ProviderContext } from "./providers/index.js";
 import { pushTransactions } from "./push.js";
 import { emptyStats, type RunStore } from "./runs.js";
 import type { ConfigStore, Connection, Settings } from "./store.js";
@@ -276,7 +276,7 @@ export class Runner {
       const missing = def.credentialFields.filter((f) => !creds[f.key]).map((f) => f.label);
       if (missing.length) throw new ProviderError(`missing credentials: ${missing.join(", ")}`);
 
-      const range = dateRange(settings.timezone, conn.lookbackDays ?? settings.lookbackDays);
+      const range = dateRange(settings.timezone, syncDays(conn));
       if (flags.debug) rlog("DEBUG RUN: visible browser, network capture and downloads kept; nothing written to Sure");
       if (discover) rlog("DISCOVER: listing accounts only, no transactions fetched");
       else if (dryRun) rlog("DRY RUN: nothing will be written to Sure");

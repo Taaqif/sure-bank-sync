@@ -15,6 +15,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { BrowserContext, Download, Page } from "playwright";
 import { parseAmount, type BankAccount, type BankTransaction } from "../models.js";
+import { parseCsv, dmyDate as anzDate } from "./csv.js";
 import { AuthError, ProviderError, captureJson, snapshot, type ProviderContext, type ProviderDefinition } from "./base.js";
 
 const LOGIN_URL = "https://login.anz.com/internetbanking";
@@ -76,45 +77,13 @@ function nextDownload(browser: BrowserContext, timeout: number): Promise<Downloa
   });
 }
 
-function splitCsvLine(line: string): string[] {
-  const out: string[] = [];
-  let cur = "";
-  let quoted = false;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (quoted) {
-      if (c === '"' && line[i + 1] === '"') {
-        cur += '"';
-        i++;
-      } else if (c === '"') quoted = false;
-      else cur += c;
-    } else if (c === '"') quoted = true;
-    else if (c === ",") {
-      out.push(cur);
-      cur = "";
-    } else cur += c;
-  }
-  out.push(cur);
-  return out.map((v) => v.trim());
-}
-
-/** "09/11/2026" (d/m/y) -> "2026-11-09" */
-function anzDate(s: string): string | null {
-  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s.trim());
-  return m ? `${m[3]}-${m[2]!.padStart(2, "0")}-${m[1]!.padStart(2, "0")}` : null;
-}
-
 /**
  * Parse ANZ's "Microsoft Excel(CSV)" export. Handles the classic headerless
  * layout (date, signed amount, description) and a headed layout with
  * separate debit/credit columns.
  */
 export function parseAnzCsv(text: string, account: BankAccount): BankTransaction[] {
-  const rows = text
-    .replace(/^\uFEFF/, "")
-    .split(/\r?\n/)
-    .filter((l) => l.trim())
-    .map(splitCsvLine);
+  const rows = parseCsv(text);
   if (!rows.length) return [];
 
   let col = { date: 0, amount: 1, debit: -1, credit: -1, desc: 2 };
@@ -172,6 +141,8 @@ export const anz: ProviderDefinition = {
     { key: "customer_id", label: "Customer Registration Number" },
     { key: "password", label: "Password", secret: true },
   ],
+  // ANZ's download offers these durations; longer needs the date-range tab (not implemented).
+  syncPeriod: { choices: DURATIONS, default: 14, note: "ANZ downloads in these fixed durations (max 120 days)." },
   create: (ctx: ProviderContext) => {
     // Full API responses hold account data: only capture them on debug runs.
     const captured = ctx.debug ? captureJson(ctx, /(^|\.)anz\.com$/) : { count: 0 };

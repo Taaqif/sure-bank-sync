@@ -213,6 +213,18 @@ describe("web", () => {
     expect((await input({ type: "key", key: "a" })).status).toBe(404);
   }, 60_000);
 
+  it("shows each bank's sync period choices, and a note for Amex", async () => {
+    const env = setup();
+    const { app } = makeApp(env);
+    const anz = await (await get(app, "/connections/new?provider=anz")).text();
+    expect(anz).toContain("Bank default (last 14 days)");
+    expect(anz).toContain("Last 120 days");
+    const amex = await (await get(app, "/connections/new?provider=amex")).text();
+    expect(amex).toContain("Amex doesn&#39;t support choosing a sync period");
+    expect(amex).not.toContain('name="lookbackDays"');
+    expect(await (await get(app, "/settings")).text()).not.toContain("Sync period");
+  });
+
   it("saves the browser console with a failed run's debug files", async () => {
     const env = setup();
     const { app, runner } = makeApp(env);

@@ -101,6 +101,10 @@ export interface BankProvider {
   logout?(): Promise<void>;
 }
 
+export type SyncPeriod =
+  | { choices: number[]; default: number; note?: string }
+  | { fixed: string; label: string };
+
 export interface ProviderDefinition {
   /** stored provider id */
   name: string;
@@ -108,5 +112,11 @@ export interface ProviderDefinition {
   label: string;
   /** login fields the UI asks for; all are required */
   credentialFields: CredentialField[];
+  /**
+   * How much history a run fetches. Either day choices that make sense for
+   * this bank (with a default), or `fixed`: the bank decides, explained in a
+   * short note shown instead of the picker.
+   */
+  syncPeriod: SyncPeriod;
   create(ctx: ProviderContext): BankProvider;
 }

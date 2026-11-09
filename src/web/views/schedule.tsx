@@ -1,4 +1,5 @@
-import { EVERY_HOURS, LOOKBACK_CHOICES, WEEKDAYS, describeCron, parseCron, type ScheduleMode } from "../../schedule.js";
+import type { SyncPeriod } from "../../providers/base.js";
+import { EVERY_HOURS, WEEKDAYS, describeCron, parseCron, type ScheduleMode } from "../../schedule.js";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -65,9 +66,21 @@ export function ScheduleField(p: { name: string; label: string; value: string | 
   );
 }
 
-/** Sync period picker (days of history per run). */
-export function LookbackField(p: { name: string; value: number | null; defaultDays?: number }) {
-  const choices = [...LOOKBACK_CHOICES];
+/**
+ * Sync period picker (days of history per run), with the bank's own choices
+ * and default. Banks with a fixed period get a note instead of a picker.
+ */
+export function LookbackField(p: { name: string; value: number | null; period: SyncPeriod }) {
+  const period = p.period;
+  if ("fixed" in period) {
+    return (
+      <div>
+        <strong>Sync period</strong>
+        <div class="note">{period.fixed}</div>
+      </div>
+    );
+  }
+  const choices = [...period.choices];
   if (p.value && !choices.includes(p.value)) choices.push(p.value);
   choices.sort((a, b) => a - b);
   const days = (n: number) => (n === 1 ? "Last 1 day" : `Last ${n} days`);
@@ -75,18 +88,19 @@ export function LookbackField(p: { name: string; value: number | null; defaultDa
     <label>
       Sync period
       <select name={p.name}>
-        {p.defaultDays !== undefined && (
-          <option value="" selected={!p.value}>
-            Use default ({days(p.defaultDays).toLowerCase()})
-          </option>
-        )}
+        <option value="" selected={!p.value}>
+          Bank default ({days(period.default).toLowerCase()})
+        </option>
         {choices.map((n) => (
           <option value={String(n)} selected={n === p.value}>
             {days(n)}
           </option>
         ))}
       </select>
-      <small>How much history each run fetches. Transactions already in Sure are skipped.</small>
+      <small>
+        How much history each run fetches. Transactions already in Sure are skipped.
+        {period.note ? ` ${period.note}` : ""}
+      </small>
     </label>
   );
 }

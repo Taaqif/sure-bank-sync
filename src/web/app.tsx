@@ -8,7 +8,7 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { Child } from "hono/jsx";
 import { logger, tailLog } from "../log.js";
 import type { MfaBroker } from "../mfa.js";
-import { PROVIDERS } from "../providers/index.js";
+import { PROVIDERS, syncLabel } from "../providers/index.js";
 import { DEBUG_TOOLS, type Runner } from "../runner.js";
 import { describeCron, nextRuns } from "../schedule.js";
 import type { RunStore } from "../runs.js";
@@ -190,7 +190,7 @@ export function createApp(svc: Services) {
     const s = store.settings();
     return store.connections().map((conn) => ({
       scheduleLabel: conn.enabled
-        ? `${describeCron(conn.schedule ?? s.schedule)} · last ${conn.lookbackDays ?? s.lookbackDays} days`
+        ? `${describeCron(conn.schedule ?? s.schedule)} · ${syncLabel(conn)}`
         : "not scheduled",
       conn,
       providerLabel: PROVIDERS[conn.provider]?.label ?? conn.provider,
@@ -258,7 +258,6 @@ export function createApp(svc: Services) {
       sureSource: str(b, "sureSource"),
       timezone: str(b, "timezone"),
       schedule: str(b, "schedule"),
-      lookbackDays: str(b, "lookbackDays"),
       skipPending: b.skipPending === "on",
       mfaTimeoutSeconds: str(b, "mfaTimeoutSeconds"),
       dryRun: b.dryRun === "on",
@@ -268,7 +267,7 @@ export function createApp(svc: Services) {
       store.saveSettings(input);
     } catch (e) {
       if (!(e instanceof ValidationError)) throw e;
-      const shown = { ...store.settings(), ...input, lookbackDays: Number(input.lookbackDays), mfaTimeoutSeconds: Number(input.mfaTimeoutSeconds) };
+      const shown = { ...store.settings(), ...input, mfaTimeoutSeconds: Number(input.mfaTimeoutSeconds) };
       return page(c, <SettingsPage s={shown} error={e.message} />, 400);
     }
     svc.scheduler.reload();
@@ -358,7 +357,8 @@ export function createApp(svc: Services) {
       provider,
       enabled: b.enabled === "on",
       schedule: str(b, "schedule") || null,
-      lookbackDays: lookback ? Number(lookback) : null,
+      // Banks with a fixed period ignore any stored choice.
+      lookbackDays: lookback && !("fixed" in def.syncPeriod) ? Number(lookback) : null,
       credentials: Object.fromEntries(def.credentialFields.map((f) => [f.key, str(b, `cred_${f.key}`).trim()])),
       options: options as Record<string, unknown>,
     };

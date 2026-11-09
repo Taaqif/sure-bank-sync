@@ -79,6 +79,7 @@ button.link:hover { color: var(--fg); }
 .login form { display: grid; gap: 14px; }
 .login label { display: grid; gap: 4px; font-weight: 500; }
 .login button[type=submit] { padding: 9px 12px; margin-top: 4px; }
+.note { margin-top: 4px; padding: 8px 10px; border-left: 3px solid var(--line); background: var(--card); color: var(--muted); font-size: 13px; border-radius: 4px; }
 .screen { display: block; width: 100%; max-width: 1366px; min-height: 200px; border: 1px solid var(--line); border-radius: 6px; cursor: crosshair; background: var(--card); }
 .rlogs { margin-top: 14px; }
 .rlogs summary { cursor: pointer; list-style: none; color: var(--muted); }

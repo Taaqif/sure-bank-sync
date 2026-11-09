@@ -35,17 +35,16 @@ describe("schedule", () => {
     expect(bad.ok).toBe(false);
   });
 
-  it("renders the picker and sync period on settings and connection pages", async () => {
+  it("renders the schedule picker on settings and the sync period on connection pages", async () => {
     const env = setup();
     const { app } = makeApp(env);
     const settings = await (await app.request("/settings", { headers: { Host: "localhost" } })).text();
     expect(settings).toContain("data-schedule");
-    expect(settings).toContain("Last 14 days");
     const conn = await (await app.request("/connections/alice-anz", { headers: { Host: "localhost" } })).text();
     expect(conn).toContain("Use default (Daily at 06:00)");
-    expect(conn).toContain("Use default (last 30 days)");
+    expect(conn).toContain("Bank default (last 14 days)");
     expect(conn).not.toContain("Debug run"); // only with SURE_SYNC_DEBUG=1
     const home = await (await app.request("/", { headers: { Host: "localhost" } })).text();
-    expect(home).toContain("Daily at 06:00 · last 30 days");
+    expect(home).toContain("Daily at 06:00 · last 14 days");
   });
 });

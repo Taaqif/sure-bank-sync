@@ -5,7 +5,7 @@ self-hosted [Sure](https://github.com/we-promise/sure) instance. Built for a
 shared household: each person has their own Sure API key and bank logins,
 all managed from a small web UI.
 
-Supported banks: **ANZ Internet Banking** (AU), **Amex** (AU, in progress).
+Supported banks: **ANZ Internet Banking** (AU), **American Express** (AU).
 `demo` is a fake bank for testing the pipeline.
 
 Stack: Node + TypeScript, Playwright, Hono (server-rendered JSX), SQLite via
@@ -35,10 +35,13 @@ cron (per connection) → Playwright logs into bank → fetch transactions
   of duplicating), so re-runs and overlapping lookback windows are safe.
 - **Dry run / Discover accounts**: dry runs log every row they would import
   and write nothing; Discover accounts only lists accounts for mapping.
-- **Schedule and sync period** are set in the UI: pick hourly / every few
-  hours / daily / weekdays / weekly (or type a cron) with a preview of the
-  next runs, and how many days of history each run fetches. Both have a
-  default in Settings and an optional per-connection override.
+- **Schedule** is set in the UI: pick hourly / every few hours / daily /
+  weekdays / weekly (or type a cron) with a preview of the next runs. Default
+  in Settings, optional per-connection override.
+- **Sync period** (days of history per run) is per bank: each bank offers the
+  choices that fit its export (ANZ: 7-120 days) and a default, and each
+  connection can pick one. Amex has no sync period: it always takes the
+  current statement period.
 - **MFA**: when a bank asks for a code the run pauses and the dashboard shows
   an input box.
 - **CAPTCHAs and other "prove you're human" steps**: the run pauses and the
@@ -95,6 +98,11 @@ Run logs include every page the browser visits (`nav: …`, query strings
 stripped).
 
 ## Banks
+
+**American Express (AU)**: logs in with User ID + password (ticks Remember
+Me, and reuses the remembered User ID), hands any CAPTCHA to you through the
+browser view and any identity check to the code box, then Dashboard → Recent
+Transactions → Download → CSV. Covers the current statement period.
 
 **ANZ Internet Banking**: logs in with CRN + password, reads the account tiles
 on the home page, then for each account clicks the tile → Download, picks a

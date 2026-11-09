@@ -24,8 +24,6 @@ export interface ScheduleSpec {
 
 export const EVERY_HOURS = [2, 3, 4, 6, 8, 12];
 export const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-/** Sync period choices (days of history fetched per run). */
-export const LOOKBACK_CHOICES = [1, 3, 7, 14, 30, 60, 90, 120];
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
