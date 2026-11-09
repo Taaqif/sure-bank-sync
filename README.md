@@ -201,20 +201,33 @@ negative = money out.
 ## Releasing
 
 `.github/workflows/ci.yml` runs the type check and tests on every push and
-pull request. Pushing a version tag also builds the Docker image and
-publishes it to GitHub Container Registry:
+pull request. Pushing a release tag (`vX.Y.Z`, nothing after it) also builds
+the Docker image and publishes it to GitHub Container Registry as `X.Y.Z`,
+`X.Y` and `latest`. Push only the tag you're releasing:
 
 ```bash
 git tag -a v0.1.0 -m "v0.1.0"
-git push origin main --tags
+git push origin main v0.1.0
 # image: ghcr.io/<your-github-user>/sure-bank-sync:0.1.0 (and :latest)
 ```
 
-On the server, point `docker-compose.yml` at that image (see the comment in
-the file), keep the same `.env` (especially `SURE_SYNC_SECRET_KEY`) and the
-`sure-sync-data` volume, then `docker compose pull && docker compose up -d`.
-GHCR packages start private: make the package public, or `docker login
-ghcr.io` on the server with a token that can read packages.
+Deploying on a server:
+
+1. Copy `docker-compose.yml` and your `.env` to the server. Keep the same
+   `SURE_SYNC_SECRET_KEY`: without it saved logins can't be read.
+2. In `docker-compose.yml`, delete the `build: .` line and set
+   `image: ghcr.io/<your-github-user>/sure-bank-sync:latest`.
+3. GHCR packages start private: make the package public, or run
+   `docker login ghcr.io` on the server with a token that can read packages.
+4. `docker compose pull && docker compose up -d`. To update later, run the
+   same command again.
+
+Data lives in the Docker volume `sure-bank-sync-data` (a fixed name, so it
+doesn't depend on the folder). Back it up with your `.env`.
+
+To change the port, set `HOST_PORT` (the port on the server) in `.env`.
+`SURE_SYNC_PORT` changes the port inside the container; the compose file and
+health check follow it.
 
 Other environment variables: `SURE_SYNC_HOST` (listen address, default all),
 `SURE_SYNC_PORT`, `SURE_SYNC_DATA_DIR`, `SURE_SYNC_ADMIN_USER` (default

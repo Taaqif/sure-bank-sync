@@ -8,7 +8,8 @@ services:
     container_name: sure-bank-sync
     restart: unless-stopped
     ports:
-      - "${HOST_PORT:-8686}:8686"
+      # Host port : the app's port inside the container (SURE_SYNC_PORT in .env, default 8686)
+      - "${HOST_PORT:-8686}:${SURE_SYNC_PORT:-8686}"
     env_file: .env
     environment:
       TZ: ${TZ:-Australia/Melbourne}
@@ -30,6 +31,9 @@ services:
 
 volumes:
   sure-sync-data:
+    # Fixed name, so the same data is used whatever folder this file is in.
+    # Back it up: it holds settings, encrypted logins and the synced record.
+    name: sure-bank-sync-data
 
 # networks:
 #   sure:
