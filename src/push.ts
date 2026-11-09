@@ -5,7 +5,7 @@
 import { assignExternalIds, formatCents, maskAccountId, type BankAccount, type BankTransaction, type IdentifiedTransaction } from "./models.js";
 import type { RunStats, RunStore } from "./runs.js";
 import type { ConfigStore, Connection, Settings } from "./store.js";
-import { SureClient, SureError, toImportCsv, type SureImport } from "./sureClient.js";
+import { SureClient, SureError, toImportCsv, type SureImport, type SureTransaction } from "./sureClient.js";
 
 export interface PushDeps {
   store: ConfigStore;
@@ -64,11 +64,25 @@ export async function pushTransactions(
     conn.id,
     mapped.map(([, t]) => t.externalId),
   );
-  const todo = mapped.filter(([, t]) => !done.has(t.externalId));
+  let todo = mapped.filter(([, t]) => !done.has(t.externalId));
   stats.skipped = mapped.length - todo.length;
   if (!todo.length) return;
 
   const sure = new SureClient(settings.sureUrl, deps.store.sureApiKey(conn.userId), settings.sureSource, 30_000, deps.fetch);
+
+  // Rows we have no local record of may still be in Sure (new database, or a
+  // run that timed out). Sure's import matches on name too, so a transaction
+  // renamed or turned into a transfer in Sure would come back as a duplicate.
+  const found = await alreadyInSure(sure, todo, log);
+  if (found.size) {
+    log(`${found.size} already in Sure; not importing them again`);
+    for (const [accountId, t] of todo) {
+      if (found.has(t) && !dryRun) deps.runs.markSynced(conn.id, t.externalId, accountId, "sure:existing");
+    }
+    todo = todo.filter(([, t]) => !found.has(t));
+    stats.skipped += found.size;
+  }
+  if (!todo.length) return;
 
   if (dryRun) {
     // Account names make the log readable; reading is fine in dry run.
@@ -116,6 +130,52 @@ export async function pushTransactions(
     stats.created += rows.length;
     log(`import ${created.id} complete (${rows.length} rows)`);
   }
+}
+
+/**
+ * Rows that already have a matching transaction in their Sure account: same
+ * date and amount, preferring one with the same name. Each Sure transaction
+ * matches at most one row, so two identical coffees in the bank and one in
+ * Sure import exactly one.
+ */
+export async function alreadyInSure(
+  sure: SureClient,
+  rows: [string, IdentifiedTransaction][],
+  log: (m: string) => void,
+): Promise<Set<IdentifiedTransaction>> {
+  const found = new Set<IdentifiedTransaction>();
+  const byAccount = new Map<string, IdentifiedTransaction[]>();
+  for (const [accountId, t] of rows) byAccount.set(accountId, [...(byAccount.get(accountId) ?? []), t]);
+  const norm = (s: string) => s.trim().split(/\s+/).join(" ").toLowerCase();
+
+  for (const [accountId, txns] of byAccount) {
+    const dates = txns.map((t) => t.date).sort();
+    let existing: SureTransaction[];
+    try {
+      existing = await sure.listTransactions(accountId, dates[0]!, dates.at(-1)!);
+    } catch (e) {
+      if (!(e instanceof SureError)) throw e;
+      log(`couldn't read existing Sure transactions (${e.message}); relying on Sure's import matching`);
+      continue;
+    }
+    const pool = new Map<string, SureTransaction[]>();
+    for (const x of existing) {
+      const k = `${x.date}|${x.amountCents}`;
+      pool.set(k, [...(pool.get(k) ?? []), x]);
+    }
+    // Same name first, so a different same-amount purchase isn't the one skipped.
+    for (const sameName of [true, false]) {
+      for (const t of txns) {
+        if (found.has(t)) continue;
+        const candidates = pool.get(`${t.date}|${t.amountCents}`);
+        const i = candidates?.findIndex((x) => !sameName || norm(x.name) === norm(t.description)) ?? -1;
+        if (i < 0) continue;
+        candidates!.splice(i, 1);
+        found.add(t);
+      }
+    }
+  }
+  return found;
 }
 
 async function waitForImport(

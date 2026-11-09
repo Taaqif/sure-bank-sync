@@ -34,9 +34,11 @@ flowchart LR
 - **Secrets encrypted** with `SURE_SYNC_SECRET_KEY` and never shown again.
 - **Map once**: the first run (or **Discover accounts**) lists the bank's
   accounts; pick the Sure account for each. Unmapped accounts are skipped.
-- **No duplicates**: a local record of what Sure confirmed, plus Sure's own
-  import matching, makes re-runs and overlapping periods safe. Imports can be
-  reverted in Sure as a batch.
+- **No duplicates**: a local record of what Sure confirmed, plus a check of
+  the Sure account for a transaction on the same date with the same amount,
+  makes re-runs and overlapping periods safe, even after you rename a
+  transaction or mark it a transfer in Sure. Imports can be reverted in Sure
+  as a batch.
 - **A person for the hard parts**: codes go in a box on the dashboard;
   CAPTCHAs and robot checks open a live browser view. Nothing is solved
   automatically.

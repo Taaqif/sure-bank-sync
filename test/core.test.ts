@@ -206,6 +206,49 @@ describe("push", () => {
   });
 });
 
+describe("already in Sure", () => {
+  it("skips rows Sure already has, even renamed, and imports the rest", async () => {
+    const env = setup();
+    const conn = env.store.connection("alice-anz")!;
+    env.store.recordBankAccounts(conn.id, [ACCT]);
+    env.store.setMapping(conn.id, ACCT.id, "acct-1", false);
+    // One coffee renamed in Sure (e.g. made a transfer), salary as-is; the second coffee is new.
+    const sure = fakeSure(undefined, "complete", [
+      { id: "t1", date: "2026-11-01", name: "Transfer to savings", amount_decimal: "4.5" },
+      { id: "t2", date: "2026-11-01", name: "SALARY", amount_decimal: "-2500.0" },
+      { id: "t3", date: "2026-11-01", name: "Something else", amount_decimal: "-4.5" },
+    ]);
+    const lines: string[] = [];
+    const s = emptyStats();
+    const batch = [txn(), txn(), txn("SALARY", 250000)];
+    await pushTransactions({ store: env.store, runs: env.runs, fetch: sure.fetch, pollMs: 1 }, conn, env.store.settings(), batch, s, (m) => lines.push(m));
+    expect(s).toMatchObject({ created: 1, skipped: 2 });
+    expect(lines).toContain("2 already in Sure; not importing them again");
+    const list = sure.calls.find((c) => c.url.includes("/transactions?"))!;
+    expect(list.url).toContain("account_id=acct-1");
+    expect(list.url).toContain("start_date=2026-11-01");
+    const post = sure.calls.find((c) => c.method === "POST")!;
+    expect(post.body.raw_file_content).toBe("date,amount,name\n2026-11-01,-4.50,COFFEE\n");
+    // all three are now known locally
+    expect(env.runs.alreadySynced(conn.id, assignExternalIds(batch).map((t) => t.externalId)).size).toBe(3);
+  });
+
+  it("still imports when Sure's transaction list can't be read", async () => {
+    const env = setup();
+    const conn = env.store.connection("alice-anz")!;
+    env.store.recordBankAccounts(conn.id, [ACCT]);
+    env.store.setMapping(conn.id, ACCT.id, "acct-1", false);
+    const sure = fakeSure();
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) =>
+      String(input).includes("/transactions?") ? new Response("nope", { status: 500 }) : sure.fetch(input, init)) as typeof fetch;
+    const lines: string[] = [];
+    const s = emptyStats();
+    await pushTransactions({ store: env.store, runs: env.runs, fetch: fetchImpl, pollMs: 1 }, conn, env.store.settings(), [txn()], s, (m) => lines.push(m));
+    expect(s.created).toBe(1);
+    expect(lines.some((l) => l.startsWith("couldn't read existing Sure transactions"))).toBe(true);
+  });
+});
+
 describe("dry run", () => {
   it("reads Sure but writes nothing and marks nothing synced", async () => {
     const env = setup();

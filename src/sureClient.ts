@@ -70,6 +70,33 @@ export class SureClient {
     return res.data;
   }
 
+  /**
+   * Transactions already in one Sure account between two dates (inclusive),
+   * as bank-convention cents (negative = money out).
+   */
+  async listTransactions(sureAccountId: string, startDate: string, endDate: string): Promise<SureTransaction[]> {
+    const out: SureTransaction[] = [];
+    for (let page = 1; page <= 50; page++) {
+      const q = new URLSearchParams({
+        account_id: sureAccountId,
+        start_date: startDate,
+        end_date: endDate,
+        per_page: "100",
+        page: String(page),
+      });
+      const data = await this.request<{ transactions?: RawSureTransaction[]; pagination?: { total_pages?: number } }>(
+        "GET",
+        `/transactions?${q}`,
+      );
+      for (const t of data.transactions ?? []) {
+        const cents = sureCents(t);
+        if (cents !== null && t.date) out.push({ id: t.id, date: t.date, amountCents: cents, name: t.name ?? "" });
+      }
+      if (!data.transactions?.length || page >= (data.pagination?.total_pages ?? 1)) break;
+    }
+    return out;
+  }
+
   async getImport(id: string): Promise<SureImport> {
     return (await this.request<{ data: SureImport }>("GET", `/imports/${encodeURIComponent(id)}`)).data;
   }
@@ -80,6 +107,32 @@ export interface SureImport {
   status: string;
   error?: string;
   stats?: { rows_count?: number; valid_rows_count?: number; invalid_rows_count?: number };
+}
+
+export interface SureTransaction {
+  id: string;
+  date: string;
+  /** bank convention: negative = money out */
+  amountCents: number;
+  name: string;
+}
+
+interface RawSureTransaction {
+  id: string;
+  date?: string;
+  name?: string;
+  /** Sure's own sign: positive = outflow */
+  amount_decimal?: string;
+  /** income positive, everything else negative */
+  signed_amount_cents?: number;
+}
+
+function sureCents(t: RawSureTransaction): number | null {
+  if (t.amount_decimal !== undefined) {
+    const n = Number(t.amount_decimal);
+    if (Number.isFinite(n)) return -Math.round(n * 100) || 0;
+  }
+  return typeof t.signed_amount_cents === "number" ? t.signed_amount_cents : null;
 }
 
 /** Rows -> CSV for a Sure TransactionImport: date (YYYY-MM-DD), signed amount (inflows positive), name. */

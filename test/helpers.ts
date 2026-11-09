@@ -35,12 +35,17 @@ export function setup() {
 export function fakeSure(
   accounts = [{ id: "acct-1", name: "Joint Everyday", currency: "AUD" }],
   importStatus = "complete",
+  /** what GET /transactions returns (Sure's sign: positive amount_decimal = money out) */
+  transactions: { id: string; date: string; name: string; amount_decimal: string }[] = [],
 ) {
   const calls: { method: string; url: string; headers: Headers; body: any }[] = [];
   const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     calls.push({ method: init?.method ?? "GET", url, headers: new Headers(init?.headers), body });
+    if (url.includes("/transactions?")) {
+      return Response.json({ transactions, pagination: { page: 1, per_page: 100, total_count: transactions.length, total_pages: 1 } });
+    }
     if (url.includes("/accounts")) return Response.json({ accounts });
     if (url.endsWith("/imports") && init?.method === "POST") {
       return Response.json({ data: { id: `imp-${calls.length}`, status: "importing" } }, { status: 201 });
