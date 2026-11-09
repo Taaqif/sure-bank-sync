@@ -3,7 +3,8 @@ import type { MfaRequest } from "../../mfa.js";
 import type { ProviderDefinition } from "../../providers/index.js";
 import type { Connection, Settings, User } from "../../store.js";
 import type { SureAccount } from "../../sureClient.js";
-import { Layout } from "./layout.js";
+import { useContext } from "hono/jsx";
+import { Layout, UiContext } from "./layout.js";
 import { Badge, CredentialInputs, RunsTable, ago, formatWhen } from "./parts.js";
 
 // --- dashboard -------------------------------------------------------------
@@ -409,6 +410,7 @@ export const ConnectionPage = (p: {
   msg?: string;
 }) => {
   const known = new Set(p.sureAccounts.map((a) => a.id));
+  const ui = useContext(UiContext);
   return (
     <Layout title={p.conn.id} nav="dashboard" msg={p.msg}>
       <div class="row between">
@@ -416,6 +418,14 @@ export const ConnectionPage = (p: {
           {p.conn.userName} · {p.conn.id} <span class="muted">({p.provider?.label ?? p.conn.provider})</span>
         </h2>
         <form method="post" action={`/connections/${p.conn.id}/run`} class="row">
+          {ui.debugTools && (
+            <button type="submit" class="secondary" name="debug" value="1" disabled={p.running} title="Dry run with a visible, slowed-down browser; captures network data and keeps downloads">
+              Debug run
+            </button>
+          )}
+          <button type="submit" class="secondary" name="discover" value="1" disabled={p.running} title="Log in and list accounts to map; no transactions, nothing written">
+            Discover accounts
+          </button>
           <button type="submit" class="secondary" name="dryRun" value="1" disabled={p.running} title="Scrape and log what would be sent, write nothing">
             Dry run now
           </button>
@@ -461,7 +471,8 @@ export const ConnectionPage = (p: {
           </form>
         ) : (
           <div class="empty">
-            No accounts discovered yet. Click <strong>Run now</strong>: accounts found at the bank will appear here to map.
+            No accounts discovered yet. Click <strong>Discover accounts</strong>: the accounts this login can see will
+            appear here to map. Nothing is imported.
           </div>
         )}
       </div>

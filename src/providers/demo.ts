@@ -2,6 +2,9 @@
 import type { BankAccount, BankTransaction } from "../models.js";
 import { AuthError, type ProviderDefinition } from "./base.js";
 
+const ACCT: BankAccount = { id: "000-111 9999", name: "Demo Everyday", currency: "AUD" };
+const SAVER: BankAccount = { id: "000-111 8888", name: "Demo Saver", currency: "AUD" };
+
 export const demo: ProviderDefinition = {
   name: "demo",
   label: "Demo bank (testing)",
@@ -14,8 +17,11 @@ export const demo: ProviderDefinition = {
         if (!/^\d{6}$/.test(code)) throw new AuthError("demo: code must be 6 digits");
       }
     },
+    async listAccounts() {
+      return [ACCT, SAVER];
+    },
     async fetchTransactions({ since, until }) {
-      const acct: BankAccount = { id: "000-111 9999", name: "Demo Everyday", currency: "AUD" };
+      const acct = ACCT;
       const out: BankTransaction[] = [];
       for (let d = new Date(`${since}T00:00:00Z`); d <= new Date(`${until}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1)) {
         const date = d.toISOString().slice(0, 10);

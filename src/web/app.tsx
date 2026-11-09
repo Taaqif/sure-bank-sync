@@ -6,7 +6,7 @@ import type { Child } from "hono/jsx";
 import { logger, tailLog } from "../log.js";
 import type { MfaBroker } from "../mfa.js";
 import { PROVIDERS } from "../providers/index.js";
-import type { Runner } from "../runner.js";
+import { DEBUG_TOOLS, type Runner } from "../runner.js";
 import type { RunStore } from "../runs.js";
 import type { Scheduler } from "../scheduler.js";
 import { ValidationError, type ConfigStore, type ConnectionInput } from "../store.js";
@@ -103,7 +103,12 @@ export function createApp(svc: Services) {
 
   const msgOf = (c: Context) => c.req.query("msg");
   const page = (c: Context, node: Child, status?: 200 | 400) =>
-    c.html(<UiContext.Provider value={{ dryRun: store.settings().dryRun }}>{node}</UiContext.Provider>, status);
+    c.html(
+      <UiContext.Provider value={{ dryRun: store.settings().dryRun, debugTools: DEBUG_TOOLS }}>
+        {node}
+      </UiContext.Provider>,
+      status,
+    );
   const removeProfile = (id: string) => rm(join(svc.dataDir, "browser", id), { recursive: true, force: true });
   const sureClient = (userId: number, timeoutMs: number) => {
     const s = store.settings();
@@ -372,7 +377,11 @@ export function createApp(svc: Services) {
     const id = c.req.param("id");
     if (!store.connection(id)) return c.notFound();
     const b = await c.req.parseBody();
-    svc.runner.startBackground(id, b.dryRun === "1" ? { dryRun: true } : {});
+    svc.runner.startBackground(id, {
+      dryRun: b.dryRun === "1" || undefined,
+      discover: b.discover === "1" || undefined,
+      debug: b.debug === "1" || undefined,
+    });
     const back = c.req.header("referer");
     let path = "/";
     try {

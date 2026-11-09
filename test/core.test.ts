@@ -232,3 +232,44 @@ describe("retention", () => {
     expect(left[0]!.id).toBe(12);
   });
 });
+
+describe("anz helpers", async () => {
+  const { accountIdFromTile, daysBetween } = await import("../src/providers/anz.js");
+  it("normalises tile account numbers", () => {
+    expect(accountIdFromTile(" 012345\n 987654321 ")).toBe("012345 987654321");
+    expect(daysBetween("2026-11-02", "2026-11-09")).toBe(8);
+  });
+});
+
+describe("navigation log labels", async () => {
+  const { navLabel } = await import("../src/runner.js");
+  it("drops query strings but keeps hash routes", () => {
+    expect(navLabel("https://banking5.ib.anz.com/IBUI/?token=abc#/download-transaction")).toBe(
+      "https://banking5.ib.anz.com/IBUI/#/download-transaction",
+    );
+    expect(navLabel("https://b.ib.anz.com/IBUI/#/login?sessionId=SECRET&ctiId=x")).toBe("https://b.ib.anz.com/IBUI/#/login");
+    expect(navLabel("not a url")).toBe("not a url");
+  });
+});
+
+describe("anz csv", async () => {
+  const { parseAnzCsv } = await import("../src/providers/anz.js");
+  const acct = { id: "012345 987654321", name: "Everyday", currency: "AUD" };
+  it("parses the headerless layout", () => {
+    const csv = '09/11/2026,-4.50,"EFTPOS CAFE, MELBOURNE"\r\n01/11/2026,"2,500.00","SALARY ACME"\r\n';
+    expect(parseAnzCsv(csv, acct)).toEqual([
+      { account: acct, date: "2026-11-09", amountCents: -450, description: "EFTPOS CAFE, MELBOURNE" },
+      { account: acct, date: "2026-11-01", amountCents: 250000, description: "SALARY ACME" },
+    ]);
+  });
+  it("parses a headed debit/credit layout", () => {
+    const csv = "Date,Details,Debit,Credit,Balance\n9/11/2026,COFFEE,4.50,,100.00\n1/11/2026,PAY,,2500.00,104.50\n";
+    expect(parseAnzCsv(csv, acct).map((t) => [t.date, t.amountCents, t.description])).toEqual([
+      ["2026-11-09", -450, "COFFEE"],
+      ["2026-11-01", 250000, "PAY"],
+    ]);
+  });
+  it("rejects junk", () => {
+    expect(() => parseAnzCsv("what,is,this\nfoo,bar,baz\n", acct)).toThrow(/header/);
+  });
+});

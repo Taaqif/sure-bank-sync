@@ -5,8 +5,8 @@ self-hosted [Sure](https://github.com/we-promise/sure) instance. Built for a
 shared household: each person has their own Sure API key and bank logins,
 all managed from a small web UI.
 
-Supported banks: **ANZ** (AU), **Amex** (AU) — in progress. `demo` is a fake
-bank for testing the pipeline.
+Supported banks: **ANZ Internet Banking** (AU), **Amex** (AU, in progress).
+`demo` is a fake bank for testing the pipeline.
 
 Stack: Node + TypeScript, Playwright, Hono (server-rendered JSX), SQLite via
 Drizzle, croner.
@@ -33,6 +33,8 @@ cron (per connection) → Playwright logs into bank → fetch transactions
 - **Dedupe**: a local record of what Sure confirmed, plus Sure's import
   matching (date + amount + currency + name updates an existing entry instead
   of duplicating), so re-runs and overlapping lookback windows are safe.
+- **Dry run / Discover accounts**: dry runs log every row they would import
+  and write nothing; Discover accounts only lists accounts for mapping.
 - **MFA**: when a bank asks for a code the run pauses and the dashboard shows
   an input box.
 - **Remembered device**: each connection keeps its own browser profile in
@@ -62,6 +64,28 @@ Open http://localhost:8686 (log in as `admin`) and follow the setup steps:
 
 **Back up `SURE_SYNC_SECRET_KEY`.** Without it the saved logins in `/data`
 can't be decrypted and must be re-entered.
+
+## Development: watching the browser
+
+Normal runs are always headless. Start the app with `SURE_SYNC_DEBUG=1` and
+each connection gets a **Debug run** button: a dry run with a visible, slowed
+down browser (needs a display, e.g. WSLg on Windows) that also saves the bank's
+JSON responses and downloaded files to the run's debug folder.
+
+```bash
+SURE_SYNC_DEBUG=1 SURE_SYNC_PORT=8687 npm run dev
+# SURE_SYNC_PAUSE_ON_ERROR=1 opens the Playwright Inspector when a debug run fails
+```
+
+Run logs include every page the browser visits (`nav: …`, query strings
+stripped).
+
+## Banks
+
+**ANZ Internet Banking**: logs in with CRN + password, reads the account tiles
+on the home page, then for each account clicks the tile → Download, picks a
+duration covering the lookback (max 120 days) with "Microsoft Excel(CSV)", and
+parses the file (date, signed amount, description).
 
 ## CLI
 

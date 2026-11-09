@@ -1,7 +1,7 @@
 /** Runs one sync for one connection: scrape -> map -> dedupe -> push to Sure. */
 import { mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { chromium } from "playwright";
+import { chromium, type BrowserContext, type Page } from "playwright";
 import { logger } from "./log.js";
 import { MfaBroker } from "./mfa.js";
 import type { BankTransaction } from "./models.js";
@@ -13,10 +13,64 @@ import { SureError } from "./sureClient.js";
 
 const log = logger("runner");
 const DEBUG_DIRS_KEPT = 30;
+/**
+ * Debug tools (visible browser, network capture, kept downloads) only exist
+ * when the process runs with SURE_SYNC_DEBUG=1, and only for runs started as
+ * debug runs. Normal runs are always headless.
+ */
+export const DEBUG_TOOLS = process.env.SURE_SYNC_DEBUG === "1";
+/** Debug runs: open the Playwright Inspector on failure instead of closing the browser. */
+const PAUSE_ON_ERROR = process.env.SURE_SYNC_PAUSE_ON_ERROR === "1";
 const RUNS_KEPT = 500;
 
 export class AlreadyRunning extends Error {}
+
+export interface RunOptions {
+  dryRun?: boolean;
+  discover?: boolean;
+  /** visible, slowed-down browser + capture; dry run. Ignored unless DEBUG_TOOLS. */
+  debug?: boolean;
+}
+
+interface RunFlags {
+  dryRun: boolean;
+  discover: boolean;
+  debug: boolean;
+}
 export class UnknownConnection extends Error {}
+
+/**
+ * "https://host/path?secret=1#/route?sessionId=x" -> "https://host/path#/route".
+ * Query strings (including ones inside SPA hash routes) can hold session tokens.
+ */
+export function navLabel(raw: string): string {
+  try {
+    const u = new URL(raw);
+    return `${u.origin}${u.pathname}${u.hash.split("?")[0]}`;
+  } catch {
+    return raw;
+  }
+}
+
+/** Log every top-level navigation (incl. in-app hash routes and new tabs) to the run log. */
+function trackNavigation(browser: BrowserContext, rlog: (m: string) => void): void {
+  let last = "";
+  const watch = (page: Page, tab: number) => {
+    page.on("framenavigated", (frame) => {
+      if (frame !== page.mainFrame()) return;
+      const label = navLabel(frame.url());
+      if (label === last || label === "about:blank") return;
+      last = label;
+      rlog(`nav${tab > 0 ? ` [tab ${tab}]` : ""}: ${label}`);
+    });
+  };
+  browser.pages().forEach(watch);
+  browser.on("page", (page) => {
+    const tab = browser.pages().indexOf(page);
+    if (tab > 0) rlog(`new tab ${tab} opened`);
+    watch(page, tab);
+  });
+}
 
 class Semaphore {
   #free: number;
@@ -63,12 +117,15 @@ export class Runner {
     return this.#running.has(connectionId);
   }
 
-  /** Run a sync to completion. Returns the run id. */
-  /** Run a sync to completion. `dryRun` defaults to the global setting. Returns the run id. */
+  /**
+   * Run a sync to completion. Returns the run id.
+   * - `dryRun` defaults to the global setting.
+   * - `discover`: log in and record the accounts the bank exposes; no transactions, nothing written.
+   */
   async run(
     connectionId: string,
     trigger: "schedule" | "manual" = "schedule",
-    opts: { dryRun?: boolean } = {},
+    opts: RunOptions = {},
   ): Promise<number> {
     const conn = this.store.connection(connectionId);
     if (!conn) throw new UnknownConnection(connectionId);
@@ -76,9 +133,11 @@ export class Runner {
     this.#running.add(connectionId);
     try {
       const settings = this.store.settings();
-      const dryRun = opts.dryRun ?? settings.dryRun;
-      const runId = this.runs.start(connectionId, conn.userName, trigger, dryRun);
-      await this.#run(runId, conn, settings, dryRun);
+      const debug = DEBUG_TOOLS && (opts.debug ?? false);
+      const discover = opts.discover ?? false;
+      const dryRun = discover || debug || (opts.dryRun ?? settings.dryRun);
+      const runId = this.runs.start(connectionId, conn.userName, discover ? "discover" : trigger, dryRun);
+      await this.#run(runId, conn, settings, { dryRun, discover, debug });
       return runId;
     } finally {
       this.#running.delete(connectionId);
@@ -86,14 +145,15 @@ export class Runner {
   }
 
   /** Fire and forget (used by "Run now"). */
-  startBackground(connectionId: string, opts: { dryRun?: boolean } = {}): void {
+  startBackground(connectionId: string, opts: RunOptions = {}): void {
     if (this.isRunning(connectionId)) return;
     this.run(connectionId, "manual", opts).catch((e) => {
       if (!(e instanceof AlreadyRunning)) log.error(`background run of ${connectionId} failed`, e);
     });
   }
 
-  async #run(runId: number, conn: Connection, settings: Settings, dryRun: boolean): Promise<void> {
+  async #run(runId: number, conn: Connection, settings: Settings, flags: RunFlags): Promise<void> {
+    const { dryRun, discover } = flags;
     const rlog = (msg: string) => {
       log.info(`[${conn.id} #${runId}] ${msg}`);
       const t = new Date().toLocaleTimeString("en-GB", { timeZone: settings.timezone, hour12: false });
@@ -110,9 +170,19 @@ export class Runner {
       if (missing.length) throw new ProviderError(`missing credentials: ${missing.join(", ")}`);
 
       const range = dateRange(settings.timezone, conn.lookbackDays ?? settings.lookbackDays);
-      if (dryRun) rlog("DRY RUN: nothing will be written to Sure");
+      if (flags.debug) rlog("DEBUG RUN: visible browser, network capture and downloads kept; nothing written to Sure");
+      if (discover) rlog("DISCOVER: listing accounts only, no transactions fetched");
+      else if (dryRun) rlog("DRY RUN: nothing will be written to Sure");
       rlog(`waiting for browser slot (${conn.provider}, ${range.since} → ${range.until})`);
-      const txns = await this.#browsers.use(() => this.#scrape(runId, conn, settings, creds, debugDir, range, rlog));
+      const txns = await this.#browsers.use(() =>
+        this.#scrape(runId, conn, settings, creds, debugDir, range, rlog, flags),
+      );
+      if (discover) {
+        const n = this.store.bankAccounts(conn.id).length;
+        this.runs.finish(runId, "success", stats);
+        rlog(`done: ${n} accounts known for this connection. Map them on the connection page.`);
+        return;
+      }
       stats.fetched = txns.length;
       rlog(`fetched ${txns.length} transactions`);
 
@@ -142,11 +212,14 @@ export class Runner {
     debugDir: string,
     range: DateRange,
     rlog: (m: string) => void,
+    flags: RunFlags,
   ): Promise<BankTransaction[]> {
+    const { discover, debug } = flags;
     const profile = join(this.dataDir, "browser", conn.id);
     await mkdir(profile, { recursive: true });
     const browser = await chromium.launchPersistentContext(profile, {
-      headless: conn.options.headless !== false,
+      headless: !debug,
+      slowMo: debug ? Number(process.env.SURE_SYNC_SLOWMO ?? 150) : undefined,
       acceptDownloads: true,
       locale: "en-AU",
       timezoneId: settings.timezone,
@@ -154,12 +227,15 @@ export class Runner {
       args: ["--disable-blink-features=AutomationControlled"],
     });
 
+    trackNavigation(browser, rlog);
+
     const ctx: ProviderContext = {
       connectionId: conn.id,
       credentials,
       options: conn.options,
       browser,
       debugDir,
+      debug,
       log: rlog,
       requestMfa: async (prompt) => {
         rlog(`waiting for MFA code: ${prompt}`);
@@ -175,11 +251,22 @@ export class Runner {
     try {
       await provider.login();
       rlog("logged in");
-      const txns = await provider.fetchTransactions(range);
+      if (provider.listAccounts) {
+        const accounts = await provider.listAccounts();
+        this.store.recordBankAccounts(conn.id, accounts);
+        rlog(`found ${accounts.length} accounts: ${accounts.map((a) => `${a.name} (${a.id})`).join(", ")}`);
+      } else if (discover) {
+        throw new ProviderError(`${conn.provider} can't list accounts; do a dry run instead to find them`);
+      }
+      const txns = discover ? [] : await provider.fetchTransactions(range);
       await provider.logout?.().catch((e: Error) => rlog(`logout failed (ignored): ${e.message}`));
       return txns;
     } catch (e) {
       await snapshot(ctx, "failure");
+      if (debug && PAUSE_ON_ERROR) {
+        rlog(`paused on error for inspection: ${(e as Error).message}. Press Resume in the Playwright Inspector to finish.`);
+        await browser.pages()[0]?.pause();
+      }
       throw e;
     } finally {
       await browser.close();

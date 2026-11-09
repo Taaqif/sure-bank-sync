@@ -2,7 +2,7 @@ import { createContext, useContext, type Child } from "hono/jsx";
 import { raw } from "hono/html";
 
 /** Request-wide UI state every page can read (set in app.tsx). */
-export const UiContext = createContext({ dryRun: false });
+export const UiContext = createContext({ dryRun: false, debugTools: false });
 
 const CSS = `
 :root {
