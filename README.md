@@ -5,7 +5,8 @@ self-hosted [Sure](https://github.com/we-promise/sure) instance. Built for a
 shared household: each person has their own Sure API key and bank logins,
 all managed from a small web UI.
 
-Supported banks: **ANZ Internet Banking** (AU), **American Express** (AU).
+Supported banks: **ANZ Internet Banking** (AU), **American Express** (AU),
+**Macquarie Bank** (AU).
 `demo` is a fake bank for testing the pipeline.
 
 Stack: Node + TypeScript, Playwright, Hono (server-rendered JSX), SQLite via
@@ -109,10 +110,50 @@ Me, and reuses the remembered User ID), hands any CAPTCHA to you through the
 browser view and any identity check to the code box, then Dashboard → Recent
 Transactions → Download → CSV. Covers the current statement period.
 
+**Macquarie Bank (AU)**: logs in with Macquarie ID + password, hands the
+"I'm not a robot" check (and anything it doesn't recognise) to you through the
+browser view, trusts the browser when asked and sends SMS codes to the code
+box. For each account it sets the transactions date filter to the sync period
+(Add filter → Date range → Custom), then Download → .CSV. Accounts with no
+transactions in the period are skipped.
+
 **ANZ Internet Banking**: logs in with CRN + password, reads the account tiles
 on the home page, then for each account clicks the tile → Download, picks a
 duration covering the lookback (max 120 days) with "Microsoft Excel(CSV)", and
 parses the file (date, signed amount, description).
+
+## When a bank needs you
+
+CAPTCHAs, "not a robot" checks and unknown login screens are handed to a
+person: every page shows an orange **Needs you in the browser** banner, and
+**Open browser view** streams the bank's page so you can click, type, paste
+and scroll (works on phones too). One-time codes are typed into the code box
+on the dashboard. The run carries on once the step is done. Nothing solves
+these checks automatically.
+
+Runs that log in often get checked more, so keep each connection's schedule
+to about once a day and don't clear saved browsers unless you need to.
+
+## Storage
+
+**Settings → Storage** shows what uses disk space (database and run logs,
+debug files, app log, saved browsers) and lets you clean each up, or
+**Delete everything** (type DELETE to confirm). Settings, household, logins,
+account mappings and the synced-transaction record are always kept; the
+synced record is what stops transactions being sent to Sure twice.
+
+## Train (development)
+
+With `SURE_SYNC_DEBUG=1`, each connection has a **Train** section: pick a
+recipe (date-filter, download, discover, login or your own name), and the
+app opens the bank (logged in with the stored login, or at its login page),
+then records each click, typed value, key press and download until you press
+**Finish recording**. The run page lists every step with selector candidates,
+a screenshot, the page HTML and a suggested Playwright call; the steps are
+also saved as `recipe-<name>.json` in the run's debug folder. Password and
+code fields are never recorded, and values that match the stored login are
+saved as `{{username}}`-style placeholders. Use it to write a new provider or
+fix one after a bank changes its site.
 
 ## CLI
 
@@ -156,6 +197,28 @@ label, credential fields, `create(ctx)` returning `login()` and
 `src/providers/index.ts`. Use `ctx.browser` (Playwright context),
 `ctx.requestMfa(prompt)` and `snapshot(ctx, name)`. Amounts are integer cents,
 negative = money out.
+
+## Releasing
+
+`.github/workflows/ci.yml` runs the type check and tests on every push and
+pull request. Pushing a version tag also builds the Docker image and
+publishes it to GitHub Container Registry:
+
+```bash
+git tag -a v0.1.0 -m "v0.1.0"
+git push origin main --tags
+# image: ghcr.io/<your-github-user>/sure-bank-sync:0.1.0 (and :latest)
+```
+
+On the server, point `docker-compose.yml` at that image (see the comment in
+the file), keep the same `.env` (especially `SURE_SYNC_SECRET_KEY`) and the
+`sure-sync-data` volume, then `docker compose pull && docker compose up -d`.
+GHCR packages start private: make the package public, or `docker login
+ghcr.io` on the server with a token that can read packages.
+
+Other environment variables: `SURE_SYNC_HOST` (listen address, default all),
+`SURE_SYNC_PORT`, `SURE_SYNC_DATA_DIR`, `SURE_SYNC_ADMIN_USER` (default
+`admin`), `LOG_LEVEL` (debug, info, warn, error).
 
 ## Security notes
 

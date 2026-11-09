@@ -1,5 +1,8 @@
 services:
   sure-bank-sync:
+    # Built from source by default. To use the image published by the GitHub
+    # workflow instead, remove "build" and set the image, e.g.
+    #   image: ghcr.io/<your-github-user>/sure-bank-sync:latest
     build: .
     image: sure-bank-sync:latest
     container_name: sure-bank-sync

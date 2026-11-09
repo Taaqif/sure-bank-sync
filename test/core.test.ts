@@ -414,7 +414,7 @@ describe("log masking", async () => {
   const { maskAccountId } = await import("../src/models.js");
   it("keeps only the last 4 digits of account numbers", () => {
     expect(maskAccountId("012345 987654321")).toBe("••4321");
-    expect(maskAccountId("amex-21002")).toBe("••1002");
+    expect(maskAccountId("amex-55501")).toBe("••5501");
     expect(maskAccountId("amex")).toBe("amex");
   });
 });
