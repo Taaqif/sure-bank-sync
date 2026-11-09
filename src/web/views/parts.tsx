@@ -10,6 +10,15 @@ export function ago(iso: string | null | undefined, now = Date.now()): string {
   return `${secs}s ago`;
 }
 
+/** Run length: "45s", "3m 12s", "1h 4m"; still running counts up to now. */
+export function duration(start: string, end: string | null | undefined, now = Date.now()): string {
+  const secs = Math.max(0, Math.round(((end ? Date.parse(end) : now) - Date.parse(start)) / 1000));
+  if (!Number.isFinite(secs)) return "—";
+  if (secs < 60) return `${secs}s`;
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ${secs % 60}s`;
+  return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`;
+}
+
 export function formatWhen(d: Date | null, tz: string): string {
   if (!d) return "—";
   return new Intl.DateTimeFormat("en-AU", {
@@ -35,12 +44,12 @@ export function RunsTable({ runs, page, pages, total, href }: RunsPage & { href:
     <div class="card">
       <table>
         <tr>
-          <th>#</th><th>Connection</th><th>Trigger</th><th>Status</th><th>Started</th>
+          <th>#</th><th>Connection</th><th>Trigger</th><th>Status</th><th>Started</th><th>Duration</th>
           <th>Fetched</th><th>New</th><th>Skipped</th><th>Unmapped</th><th>Error</th>
         </tr>
         {runs.length === 0 && (
           <tr>
-            <td colspan={10} class="muted">No runs yet.</td>
+            <td colspan={11} class="muted">No runs yet.</td>
           </tr>
         )}
         {runs.map((r) => (
@@ -53,6 +62,7 @@ export function RunsTable({ runs, page, pages, total, href }: RunsPage & { href:
             </td>
             <td><Badge status={r.status} /></td>
             <td>{ago(r.startedAt)}</td>
+            <td>{duration(r.startedAt, r.finishedAt)}{!r.finishedAt && "…"}</td>
             <td>{r.fetched}</td>
             <td>{r.created}</td>
             <td>{r.skipped}</td>
