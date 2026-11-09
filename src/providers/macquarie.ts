@@ -287,6 +287,8 @@ export const macquarie: ProviderDefinition = {
           await snapshot(ctx, "no-login-form");
           throw new ProviderError("Macquarie: couldn't find the login form (see the screenshot)");
         });
+        // Bot protection (Akamai) scores time on the login page; type after a person-like pause.
+        await pause(5000, 9000);
         await typeInto(user, ctx.credentials.username!);
         await pause(300, 800);
 

@@ -157,7 +157,8 @@ export const anz: ProviderDefinition = {
         ctx.log("anz: opening login page");
         await page.goto(LOGIN_URL, { waitUntil: "domcontentloaded", timeout: 45_000 });
         await page.locator(SEL.crn).waitFor({ timeout: 30_000 });
-        await pause(800, 1600);
+        // Bot protection scores time on the login page; type after a person-like pause.
+        await pause(5000, 9000);
 
         // Typed with human-ish delays: the page runs behavioural bot detection.
         await page.locator(SEL.crn).click();
