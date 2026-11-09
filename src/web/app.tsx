@@ -116,7 +116,10 @@ export function createApp(svc: Services) {
   function authenticated(c: Context): boolean {
     const admin = svc.admin!;
     if (verifySession(getCookie(c, SESSION_COOKIE), secret, admin.user, admin.password)) return true;
-    // Basic auth still works for scripts/curl.
+    // Basic auth still works for scripts/curl, but not from web browsers: they
+    // keep sending saved Basic credentials, which would undo Log out.
+    // Browsers mark every request with Sec-Fetch-Mode; scripts don't.
+    if (c.req.header("sec-fetch-mode")) return false;
     const [scheme, encoded] = (c.req.header("authorization") ?? "").split(" ");
     if (scheme?.toLowerCase() === "basic" && encoded) {
       const decoded = Buffer.from(encoded, "base64").toString();

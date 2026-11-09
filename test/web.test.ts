@@ -130,6 +130,10 @@ describe("web", () => {
     const basic = (u: string, p: string) => ({ Authorization: "Basic " + Buffer.from(`${u}:${p}`).toString("base64") });
     expect((await get(app, "/", basic("admin", "wrong"))).status).toBe(303);
     expect((await get(app, "/", basic("admin", "s3cret"))).status).toBe(200);
+    // A browser's saved Basic credentials don't count, so Log out sticks.
+    const fromBrowser = { ...basic("admin", "s3cret"), "Sec-Fetch-Mode": "navigate" };
+    expect((await get(app, "/", fromBrowser)).headers.get("location")).toContain("/login");
+    expect((await get(app, "/login", fromBrowser)).status).toBe(200);
     expect((await get(app, "/healthz")).status).toBe(200);
 
     const r = await app.request(
