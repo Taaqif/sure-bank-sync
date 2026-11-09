@@ -88,6 +88,7 @@ async function main() {
     mfa,
     dataDir,
     logMaxBytes,
+    sessionSecret: key,
     admin: password ? { user: process.env.SURE_SYNC_ADMIN_USER ?? "admin", password } : undefined,
   });
   const port = Number(args.port);

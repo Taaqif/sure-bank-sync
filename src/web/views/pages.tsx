@@ -4,7 +4,7 @@ import type { ProviderDefinition } from "../../providers/index.js";
 import type { Connection, Settings, User } from "../../store.js";
 import type { SureAccount } from "../../sureClient.js";
 import { useContext } from "hono/jsx";
-import { Layout, UiContext } from "./layout.js";
+import { BareLayout, Layout, UiContext } from "./layout.js";
 import { Badge, CredentialInputs, RunsTable, ago, formatWhen } from "./parts.js";
 import { LookbackField, SCHEDULE_JS, ScheduleField } from "./schedule.js";
 
@@ -614,4 +614,30 @@ export const LogsPage = (p: { entries: LogEntry[]; level: string; q: string; max
       </pre>
     </div>
   </Layout>
+);
+
+// --- login -----------------------------------------------------------------
+
+export const LoginPage = (p: { next: string; error?: string; username?: string }) => (
+  <BareLayout title="Sign in">
+    <div class="login-wrap">
+      <div class="login">
+        <h1>Bank Sync → Sure</h1>
+        <p class="sub">Sign in to manage bank syncing.</p>
+        {p.error && <div class="flash error">{p.error}</div>}
+        <form method="post" action="/login">
+          <input type="hidden" name="next" value={p.next} />
+          <label>
+            Username
+            <input type="text" name="username" value={p.username ?? ""} autocomplete="username" required autofocus={!p.username} />
+          </label>
+          <label>
+            Password
+            <input type="password" name="password" autocomplete="current-password" required autofocus={!!p.username} />
+          </label>
+          <button type="submit">Sign in</button>
+        </form>
+      </div>
+    </div>
+  </BareLayout>
 );

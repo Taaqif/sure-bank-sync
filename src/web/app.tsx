@@ -1,7 +1,9 @@
 import { readFile, readdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { timingSafeEqual } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { Hono, type Context } from "hono";
+import { getConnInfo } from "@hono/node-server/conninfo";
+import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { Child } from "hono/jsx";
 import { logger, tailLog } from "../log.js";
 import type { MfaBroker } from "../mfa.js";
@@ -12,9 +14,11 @@ import type { RunStore } from "../runs.js";
 import type { Scheduler } from "../scheduler.js";
 import { ValidationError, type ConfigStore, type ConnectionInput } from "../store.js";
 import { SureClient, SureError, type SureAccount } from "../sureClient.js";
+import { LoginLimiter, SESSION_COOKIE, SESSION_TTL_SECONDS, createSession, safeNext, verifySession } from "./session.js";
 import { UiContext } from "./views/layout.js";
 import {
   ConnectionNewPage,
+  LoginPage,
   LogLines,
   LogsPage,
   type LogEntry,
@@ -37,6 +41,8 @@ export interface Services {
   mfa: MfaBroker;
   dataDir: string;
   admin?: { user: string; password: string };
+  /** signs session cookies; defaults to a per-process random secret */
+  sessionSecret?: string;
   /** shown on the logs page */
   logMaxBytes?: number;
   /** for tests */
@@ -88,24 +94,86 @@ export function createApp(svc: Services) {
 
   app.get("/healthz", (c) => c.json({ status: "ok" }));
 
-  app.use("*", async (c, next) => {
-    if (!svc.admin) return next();
-    const header = c.req.header("authorization") ?? "";
-    const [scheme, encoded] = header.split(" ");
+  // --- login ----------------------------------------------------------------
+  const secret = svc.sessionSecret ?? randomBytes(32).toString("hex");
+  const limiter = new LoginLimiter();
+  // Socket address, not X-Forwarded-For (a client could rotate that header to dodge the limit).
+  const clientKey = (c: Context) => {
+    try {
+      return getConnInfo(c).remote.address ?? "unknown";
+    } catch {
+      return "local";
+    }
+  };
+  const isHttps = (c: Context) =>
+    (c.req.header("x-forwarded-proto") ?? new URL(c.req.url).protocol.replace(":", "")) === "https";
+
+  function authenticated(c: Context): boolean {
+    const admin = svc.admin!;
+    if (verifySession(getCookie(c, SESSION_COOKIE), secret, admin.user, admin.password)) return true;
+    // Basic auth still works for scripts/curl.
+    const [scheme, encoded] = (c.req.header("authorization") ?? "").split(" ");
     if (scheme?.toLowerCase() === "basic" && encoded) {
       const decoded = Buffer.from(encoded, "base64").toString();
       const i = decoded.indexOf(":");
-      if (i >= 0 && safeEqual(decoded.slice(0, i), svc.admin.user) && safeEqual(decoded.slice(i + 1), svc.admin.password)) {
-        return next();
-      }
+      return i >= 0 && safeEqual(decoded.slice(0, i), admin.user) && safeEqual(decoded.slice(i + 1), admin.password);
     }
-    return c.text("login required", 401, { "WWW-Authenticate": 'Basic realm="sure-bank-sync"' });
+    return false;
+  }
+
+  app.get("/login", (c) => {
+    if (!svc.admin || authenticated(c)) return c.redirect(safeNext(c.req.query("next")), 303);
+    return c.html(<LoginPage next={safeNext(c.req.query("next"))} />);
+  });
+
+  app.post("/login", async (c) => {
+    if (!svc.admin) return c.redirect("/", 303);
+    const b = await c.req.parseBody();
+    const next = safeNext(str(b, "next"));
+    const key = clientKey(c);
+    if (limiter.blocked(key)) {
+      log.warn(`login blocked for ${key}: too many failed attempts`);
+      return c.html(<LoginPage next={next} error="Too many failed attempts. Try again in 15 minutes." />, 429);
+    }
+    const ok = safeEqual(str(b, "username"), svc.admin.user) && safeEqual(str(b, "password"), svc.admin.password);
+    if (!ok) {
+      limiter.fail(key);
+      log.warn(`failed login for ${JSON.stringify(str(b, "username").slice(0, 40))} from ${key}`);
+      await new Promise((r) => setTimeout(r, 400));
+      return c.html(<LoginPage next={next} username={str(b, "username")} error="Wrong username or password." />, 401);
+    }
+    limiter.reset(key);
+    setCookie(c, SESSION_COOKIE, createSession(secret, svc.admin.user, svc.admin.password), {
+      httpOnly: true,
+      sameSite: "Lax",
+      secure: isHttps(c),
+      path: "/",
+      maxAge: SESSION_TTL_SECONDS,
+    });
+    log.info(`login from ${key}`);
+    return c.redirect(next, 303);
+  });
+
+  app.post("/logout", (c) => {
+    deleteCookie(c, SESSION_COOKIE, { path: "/" });
+    return c.redirect("/login", 303);
+  });
+
+  app.use("*", async (c, next) => {
+    if (!svc.admin || authenticated(c)) return next();
+    const path = c.req.path;
+    const wantsHtml = c.req.method === "GET" && !path.startsWith("/api/") && !path.startsWith("/partials/");
+    if (wantsHtml) {
+      const target = path + (new URL(c.req.url).search || "");
+      return c.redirect(`/login?next=${encodeURIComponent(target)}`, 303);
+    }
+    return c.json({ error: "login_required" }, 401);
   });
 
   const msgOf = (c: Context) => c.req.query("msg");
   const page = (c: Context, node: Child, status?: 200 | 400) =>
     c.html(
-      <UiContext.Provider value={{ dryRun: store.settings().dryRun, debugTools: DEBUG_TOOLS }}>
+      <UiContext.Provider value={{ dryRun: store.settings().dryRun, debugTools: DEBUG_TOOLS, auth: !!svc.admin }}>
         {node}
       </UiContext.Provider>,
       status,

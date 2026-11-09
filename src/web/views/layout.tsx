@@ -2,7 +2,7 @@ import { createContext, useContext, type Child } from "hono/jsx";
 import { raw } from "hono/html";
 
 /** Request-wide UI state every page can read (set in app.tsx). */
-export const UiContext = createContext({ dryRun: false, debugTools: false });
+export const UiContext = createContext({ dryRun: false, debugTools: false, auth: false });
 
 const CSS = `
 :root {
@@ -70,10 +70,37 @@ pre { background: var(--card); border: 1px solid var(--line); border-radius: 8px
 .schedule .row { flex-wrap: wrap; }
 .cron-line { display: flex !important; gap: 8px; align-items: center; font-weight: 400 !important; }
 .cron-line input { font-family: ui-monospace, monospace; font-size: 12px; max-width: 220px; }
+button.link { background: none; border: 0; padding: 0; color: var(--muted); font-weight: 500; }
+button.link:hover { color: var(--fg); }
+.login-wrap { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
+.login { width: 100%; max-width: 360px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 28px 24px; }
+.login h1 { font-size: 18px; margin: 0 0 4px; }
+.login p.sub { color: var(--muted); margin: 0 0 20px; font-size: 13px; }
+.login form { display: grid; gap: 14px; }
+.login label { display: grid; gap: 4px; font-weight: 500; }
+.login button[type=submit] { padding: 9px 12px; margin-top: 4px; }
 .shots img { max-width: 100%; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 12px; }
 `;
 
 export type Nav = "dashboard" | "household" | "logs" | "settings";
+
+/** Minimal page shell without navigation (login). */
+export function BareLayout(props: { title: string; children?: Child }) {
+  return (
+    <>
+      {raw("<!doctype html>")}
+      <html lang="en">
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <title>{props.title} · Bank Sync</title>
+          <style dangerouslySetInnerHTML={{ __html: CSS }} />
+        </head>
+        <body>{props.children}</body>
+      </html>
+    </>
+  );
+}
 
 export function Layout(props: { title?: string; nav?: Nav; msg?: string; error?: string; children?: Child; script?: string }) {
   const tab = (n: Nav, href: string, label: string) => (
@@ -103,6 +130,11 @@ export function Layout(props: { title?: string; nav?: Nav; msg?: string; error?:
               {tab("household", "/users", "Household")}
               {tab("logs", "/logs", "Logs")}
               {tab("settings", "/settings", "Settings")}
+              {ui.auth && (
+                <form method="post" action="/logout" style="margin-left:auto">
+                  <button type="submit" class="link">Log out</button>
+                </form>
+              )}
             </nav>
           </header>
           {ui.dryRun && (

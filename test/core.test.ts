@@ -273,3 +273,19 @@ describe("anz csv", async () => {
     expect(() => parseAnzCsv("what,is,this\nfoo,bar,baz\n", acct)).toThrow(/header/);
   });
 });
+
+describe("sessions", async () => {
+  const { createSession, verifySession, safeNext } = await import("../src/web/session.js");
+  it("signs, expires and invalidates on password change", () => {
+    const t = createSession("k", "admin", "pw", 0);
+    expect(verifySession(t, "k", "admin", "pw", 1000)).toBe(true);
+    expect(verifySession(t, "k", "admin", "changed", 1000)).toBe(false);
+    expect(verifySession(t, "other", "admin", "pw", 1000)).toBe(false);
+    expect(verifySession(t, "k", "admin", "pw", 31 * 24 * 3600 * 1000)).toBe(false);
+    expect(verifySession("garbage", "k", "admin", "pw")).toBe(false);
+  });
+  it("only allows local redirect targets", () => {
+    expect(safeNext("/settings?x=1")).toBe("/settings?x=1");
+    for (const bad of ["//evil.com", "https://evil.com", "/\\evil.com", "", undefined]) expect(safeNext(bad)).toBe("/");
+  });
+});

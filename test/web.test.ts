@@ -78,12 +78,55 @@ describe("web", () => {
     expect(existsSync(profile)).toBe(false);
   });
 
-  it("requires login and blocks cross-site posts", async () => {
+  it("redirects to a login page and signs in with a session cookie", async () => {
+    const env = setup();
+    const { app } = makeApp(env, { password: "s3cret" });
+
+    const r = await get(app, "/settings?x=1");
+    expect(r.status).toBe(303);
+    expect(r.headers.get("location")).toBe("/login?next=%2Fsettings%3Fx%3D1");
+    expect((await app.request("/api/status", { headers: { Host: "localhost" } })).status).toBe(401);
+
+    const page = await (await get(app, "/login?next=/settings")).text();
+    expect(page).toContain('name="password"');
+    expect(page).not.toContain("Household"); // no nav before login
+
+    const bad = await app.request("/login", form({ username: "admin", password: "nope", next: "/settings" }));
+    expect(bad.status).toBe(401);
+    expect(await bad.text()).toContain("Wrong username or password");
+
+    const ok = await app.request("/login", form({ username: "admin", password: "s3cret", next: "/settings" }));
+    expect(ok.status).toBe(303);
+    expect(ok.headers.get("location")).toBe("/settings");
+    const cookie = ok.headers.get("set-cookie")!;
+    expect(cookie).toMatch(/sbs_session=.*HttpOnly.*SameSite=Lax/i);
+    const session = cookie.split(";")[0]!;
+
+    const home = await get(app, "/", { Cookie: session });
+    expect(home.status).toBe(200);
+    expect(await home.text()).toContain("Log out");
+
+    // open redirects are refused
+    const evil = await app.request("/login", form({ username: "admin", password: "s3cret", next: "//evil.example" }));
+    expect(evil.headers.get("location")).toBe("/");
+
+    // a tampered cookie is rejected
+    expect((await get(app, "/", { Cookie: session.replace(/.$/, "x") })).status).toBe(303);
+  });
+
+  it("rate-limits failed logins", async () => {
+    const env = setup();
+    const { app } = makeApp(env, { password: "s3cret" });
+    for (let i = 0; i < 10; i++) await app.request("/login", form({ username: "admin", password: "x" }));
+    const r = await app.request("/login", form({ username: "admin", password: "s3cret" }));
+    expect(r.status).toBe(429);
+  }, 15_000);
+
+  it("still accepts basic auth for scripts and blocks cross-site posts", async () => {
     const env = setup();
     const { app } = makeApp(env, { password: "s3cret" });
     const basic = (u: string, p: string) => ({ Authorization: "Basic " + Buffer.from(`${u}:${p}`).toString("base64") });
-    expect((await get(app, "/")).status).toBe(401);
-    expect((await get(app, "/", basic("admin", "wrong"))).status).toBe(401);
+    expect((await get(app, "/", basic("admin", "wrong"))).status).toBe(303);
     expect((await get(app, "/", basic("admin", "s3cret"))).status).toBe(200);
     expect((await get(app, "/healthz")).status).toBe(200);
 
