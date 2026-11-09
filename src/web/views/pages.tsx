@@ -256,7 +256,23 @@ export const DashboardPage = (p: DashboardProps & { msg?: string }) => (
 
 const mb = (bytes: number) => (bytes < 1e6 ? `${Math.max(1, Math.round(bytes / 1e3))} KB` : `${(bytes / 1e6).toFixed(1)} MB`);
 
-export const SettingsPage = (p: { s: Settings; browserData?: { profiles: number; bytes: number }; msg?: string; error?: string }) => (
+export interface StorageInfo {
+  /** state.db + WAL files */
+  dbBytes: number;
+  runs: number;
+  /** run log text inside the database */
+  logBytes: number;
+  /** "already sent to Sure" records (kept: they prevent duplicates) */
+  synced: number;
+  debugRuns: number;
+  debugBytes: number;
+  appLogBytes: number;
+  browser: { profiles: number; bytes: number };
+}
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+export const SettingsPage = (p: { s: Settings; storage?: StorageInfo; msg?: string; error?: string }) => (
   <Layout title="Settings" nav="settings" msg={p.msg} error={p.error} script={SCHEDULE_JS}>
     <h2>Settings</h2>
     <div class="card">
@@ -313,33 +329,101 @@ export const SettingsPage = (p: { s: Settings; browserData?: { profiles: number;
       </form>
     </div>
 
-    <h2>Browser data</h2>
-    <div class="card">
-      <form
-        class="stack"
-        method="post"
-        action="/settings/clear-browsers"
-        onsubmit="return confirm('Delete every saved browser? All connections are logged out and banks will treat the next login as a new device (expect identity checks).')"
-      >
-        <p style="margin:0">
-          Each connection keeps its own browser (cookies, sessions, remembered devices).{" "}
-          {p.browserData && (
-            <span class="muted">
-              {p.browserData.profiles} saved browser{p.browserData.profiles === 1 ? "" : "s"}
-              {p.browserData.profiles > 0 && `, ${mb(p.browserData.bytes)}`}.
-            </span>
-          )}
-        </p>
-        <small class="hint">
-          Clearing them logs every connection out. Banks then treat the next login as a new device, so expect
-          identity checks or a CAPTCHA. Saved passwords and settings are kept.
-        </small>
-        <div>
-          <button type="submit" class="danger">Clear all browser data</button>
-        </div>
-      </form>
-    </div>
+    {p.storage && <StorageSection st={p.storage} />}
   </Layout>
+);
+
+/** Settings -> Storage: what uses disk space, and cleanup where it's safe. */
+const StorageSection = ({ st }: { st: StorageInfo }) => (
+  <>
+    <h2 id="storage">Storage</h2>
+    <div class="card">
+      <table class="storage">
+        <tr>
+          <th>What</th>
+          <th>Size</th>
+          <th />
+        </tr>
+        <tr>
+          <td>
+            Database
+            <div class="hint">
+              {plural(st.runs, "run")} (logs {mb(st.logBytes)}), {plural(st.synced, "synced transaction record")}, settings and
+              logins
+            </div>
+          </td>
+          <td>{mb(st.dbBytes)}</td>
+          <td>
+            <form method="post" action="/settings/storage/runs" class="row" onsubmit="return confirm('Delete these runs and their logs?')">
+              <select name="olderThanDays" style="width:auto">
+                <option value="90">older than 90 days</option>
+                <option value="30" selected>older than 30 days</option>
+                <option value="7">older than 7 days</option>
+                <option value="0">all finished runs</option>
+              </select>
+              <button type="submit" class="secondary">
+                Delete runs
+              </button>
+            </form>
+          </td>
+        </tr>
+        <tr>
+          <td>
+            Debug files
+            <div class="hint">Screenshots, page HTML, browser logs and downloads of {plural(st.debugRuns, "run")}</div>
+          </td>
+          <td>{mb(st.debugBytes)}</td>
+          <td>
+            <form method="post" action="/settings/storage/debug" onsubmit="return confirm('Delete all debug files? Runs in progress keep theirs.')">
+              <button type="submit" class="secondary" disabled={st.debugRuns === 0}>
+                Delete debug files
+              </button>
+            </form>
+          </td>
+        </tr>
+        <tr>
+          <td>
+            App log
+            <div class="hint">What the Logs page shows</div>
+          </td>
+          <td>{mb(st.appLogBytes)}</td>
+          <td>
+            <form method="post" action="/settings/storage/app-log" onsubmit="return confirm('Clear the app log?')">
+              <button type="submit" class="secondary">
+                Clear app log
+              </button>
+            </form>
+          </td>
+        </tr>
+        <tr>
+          <td>
+            Saved browsers
+            <div class="hint">
+              {plural(st.browser.profiles, "connection")}: cookies, sessions and remembered devices
+            </div>
+          </td>
+          <td>{mb(st.browser.bytes)}</td>
+          <td>
+            <form
+              method="post"
+              action="/settings/clear-browsers"
+              onsubmit="return confirm('Delete every saved browser? All connections are logged out and banks will treat the next login as a new device (expect identity checks).')"
+            >
+              <button type="submit" class="danger" disabled={st.browser.profiles === 0}>
+                Clear all browser data
+              </button>
+            </form>
+          </td>
+        </tr>
+      </table>
+      <div class="hint" style="padding:0 16px 14px">
+        Kept automatically: the last 500 runs and debug files of the last 30. Synced transaction records are never
+        deleted here: they stop transactions being sent to Sure twice. Debug files can contain account details. Clearing
+        saved browsers logs every connection out, so banks treat the next login as a new device (expect identity
+        checks).
+      </div>
+    </div>
+  </>
 );
 
 // --- household -------------------------------------------------------------

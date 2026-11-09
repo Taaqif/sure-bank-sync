@@ -1,6 +1,8 @@
 import { mkdirSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { sql } from "drizzle-orm";
+import { emptyStats } from "../src/runs.js";
 import { fakeSure, form, makeApp, setup } from "./helpers.js";
 
 const ACCT_ID = "012-345 6789999";
@@ -264,9 +266,37 @@ describe("web", () => {
     const profile = join(env.dir, "browser", "alice-anz");
     mkdirSync(profile, { recursive: true });
     writeFileSync(join(profile, "Cookies"), "x".repeat(2000));
-    expect(await (await get(app, "/settings")).text()).toContain("1 saved browser, 2 KB");
+    const html = await (await get(app, "/settings")).text();
+    expect(html).toContain("1 connection: cookies");
+    expect(html).toContain("2 KB");
     const r = await app.request("/settings/clear-browsers", form({}));
     expect(r.headers.get("location")).toContain("Cleared%201%20saved%20browser");
     expect(existsSync(profile)).toBe(false);
+  });
+
+  it("cleans up old runs and debug files from settings", async () => {
+    const env = setup();
+    const { app } = makeApp(env);
+    const old = env.runs.start("alice-anz", "alice", "manual");
+    env.runs.finish(old, "success", emptyStats());
+    env.runs.db.run(sql`UPDATE runs SET started_at = '2020-01-01T00:00:00Z' WHERE id = ${old}`);
+    const recent = env.runs.start("alice-anz", "alice", "manual");
+    env.runs.finish(recent, "success", emptyStats());
+    const dbg = join(env.dir, "debug", `run-${old}`);
+    mkdirSync(dbg, { recursive: true });
+    writeFileSync(join(dbg, "failure-0.png"), "x");
+    expect(await (await get(app, "/settings")).text()).toContain("2 runs");
+
+    let r = await app.request("/settings/storage/runs", form({ olderThanDays: "30" }));
+    expect(r.headers.get("location")).toContain("Deleted%201%20run");
+    expect(env.runs.get(old)).toBeUndefined();
+    expect(env.runs.get(recent)).toBeDefined();
+
+    r = await app.request("/settings/storage/debug", form({}));
+    expect(r.headers.get("location")).toContain("Deleted%20debug%20files%20of%201%20run");
+    expect(existsSync(dbg)).toBe(false);
+
+    r = await app.request("/settings/storage/runs", form({ olderThanDays: "5" }));
+    expect(r.headers.get("location")).toContain("Error");
   });
 });

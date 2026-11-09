@@ -6,7 +6,7 @@ import { streamSSE } from "hono/streaming";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { Child } from "hono/jsx";
-import { logger, tailLog } from "../log.js";
+import { clearLogFile, logFileBytes, logger, tailLog } from "../log.js";
 import type { MfaBroker } from "../mfa.js";
 import { PROVIDERS, syncLabel } from "../providers/index.js";
 import { DEBUG_TOOLS, type Runner } from "../runner.js";
@@ -35,6 +35,7 @@ import {
   UsersPage,
   type ConnectionRow,
   type DashboardProps,
+  type StorageInfo,
 } from "./views/pages.js";
 
 export interface Services {
@@ -262,10 +263,8 @@ export function createApp(svc: Services) {
   });
 
   // --- settings -------------------------------------------------------------
-  /** Saved browser profiles (one per connection) and their size on disk. */
-  async function browserData(): Promise<{ profiles: number; bytes: number }> {
-    const root = join(svc.dataDir, "browser");
-    const dirs = await readdir(root).catch(() => [] as string[]);
+  /** Total size of the files under `root`. */
+  async function dirBytes(root: string): Promise<number> {
     let bytes = 0;
     const walk = async (p: string): Promise<void> => {
       for (const e of await readdir(p, { withFileTypes: true }).catch(() => [])) {
@@ -275,20 +274,67 @@ export function createApp(svc: Services) {
       }
     };
     await walk(root);
-    return { profiles: dirs.length, bytes };
+    return bytes;
+  }
+
+  /** Saved browser profiles (one per connection) and their size on disk. */
+  async function browserData(): Promise<{ profiles: number; bytes: number }> {
+    const root = join(svc.dataDir, "browser");
+    const dirs = await readdir(root).catch(() => [] as string[]);
+    return { profiles: dirs.length, bytes: await dirBytes(root) };
+  }
+
+  /** What takes space in the data folder, for Settings -> Storage. */
+  async function storage(): Promise<StorageInfo> {
+    const fileBytes = async (p: string) => (await stat(p).catch(() => ({ size: 0 }))).size;
+    const db = join(svc.dataDir, "state.db");
+    const debugDirs = (await readdir(join(svc.dataDir, "debug")).catch(() => [] as string[])).filter((d) => /^run-\d+$/.test(d));
+    return {
+      dbBytes: (await fileBytes(db)) + (await fileBytes(`${db}-wal`)) + (await fileBytes(`${db}-shm`)),
+      ...runs.storageStats(),
+      debugRuns: debugDirs.length,
+      debugBytes: await dirBytes(join(svc.dataDir, "debug")),
+      appLogBytes: logFileBytes(),
+      browser: await browserData(),
+    };
   }
 
   app.get("/settings", async (c) =>
-    page(c, <SettingsPage s={store.settings()} browserData={await browserData()} msg={msgOf(c)} />),
+    page(c, <SettingsPage s={store.settings()} storage={await storage()} msg={msgOf(c)} />),
   );
+
+  // Storage cleanup. Run history and debug files of runs in progress are kept.
+  app.post("/settings/storage/runs", async (c) => {
+    const days = Number((await c.req.parseBody()).olderThanDays);
+    if (![0, 7, 30, 90].includes(days)) return redirect(c, "/settings#storage", "Error: pick how old");
+    const n = runs.deleteFinishedOlderThan(days);
+    runs.compact();
+    log.info(`deleted ${n} runs older than ${days} days`);
+    return redirect(c, "/settings#storage", `Deleted ${n} run${n === 1 ? "" : "s"} and their logs`);
+  });
+
+  app.post("/settings/storage/debug", async (c) => {
+    const root = join(svc.dataDir, "debug");
+    const keep = new Set(svc.runner.activeRunIds().map((id) => `run-${id}`));
+    const dirs = (await readdir(root).catch(() => [] as string[])).filter((d) => /^run-\d+$/.test(d) && !keep.has(d));
+    await Promise.all(dirs.map((d) => rm(join(root, d), { recursive: true, force: true })));
+    log.info(`deleted debug files of ${dirs.length} runs`);
+    return redirect(c, "/settings#storage", `Deleted debug files of ${dirs.length} run${dirs.length === 1 ? "" : "s"}`);
+  });
+
+  app.post("/settings/storage/app-log", (c) => {
+    clearLogFile();
+    log.info("app log cleared from Settings");
+    return redirect(c, "/settings#storage", "Cleared the app log");
+  });
 
   // Forget every saved browser: cookies, sessions and remembered devices for all connections.
   app.post("/settings/clear-browsers", async (c) => {
-    if (svc.runner.anyRunning()) return redirect(c, "/settings", "Error: stop the runs in progress first");
+    if (svc.runner.anyRunning()) return redirect(c, "/settings#storage", "Error: stop the runs in progress first");
     const { profiles } = await browserData();
     await rm(join(svc.dataDir, "browser"), { recursive: true, force: true });
     log.info(`cleared ${profiles} browser profiles`);
-    return redirect(c, "/settings", `Cleared ${profiles} saved browser${profiles === 1 ? "" : "s"}`);
+    return redirect(c, "/settings#storage", `Cleared ${profiles} saved browser${profiles === 1 ? "" : "s"}`);
   });
 
   app.post("/settings", async (c) => {
@@ -309,7 +355,7 @@ export function createApp(svc: Services) {
     } catch (e) {
       if (!(e instanceof ValidationError)) throw e;
       const shown = { ...store.settings(), ...input, mfaTimeoutSeconds: Number(input.mfaTimeoutSeconds) };
-      return page(c, <SettingsPage s={shown} browserData={await browserData()} error={e.message} />, 400);
+      return page(c, <SettingsPage s={shown} storage={await storage()} error={e.message} />, 400);
     }
     svc.scheduler.reload();
     return redirect(c, "/settings", "Settings saved");

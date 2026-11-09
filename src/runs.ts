@@ -64,6 +64,28 @@ export class RunStore {
     this.db.run(sql`DELETE FROM runs WHERE id <= (SELECT id FROM runs ORDER BY id DESC LIMIT 1 OFFSET ${keep})`);
   }
 
+  /** Rows and run-log text size, for Settings -> Storage. */
+  storageStats(): { runs: number; logBytes: number; synced: number } {
+    const r = this.db.select({ n: sql<number>`count(*)`, bytes: sql<number>`coalesce(sum(length(${runs.log})), 0)` }).from(runs).get();
+    const s = this.db.select({ n: sql<number>`count(*)` }).from(synced).get();
+    return { runs: r?.n ?? 0, logBytes: r?.bytes ?? 0, synced: s?.n ?? 0 };
+  }
+
+  /** Delete finished runs started more than `days` ago. Returns how many. */
+  deleteFinishedOlderThan(days: number, now = Date.now()): number {
+    const cutoff = new Date(now - days * 86_400_000).toISOString().replace(/\.\d{3}Z$/, "Z");
+    const res = this.db.run(
+      sql`DELETE FROM runs WHERE status NOT IN ('running', 'awaiting_mfa') AND started_at < ${cutoff}`,
+    );
+    return res.changes;
+  }
+
+  /** Give freed space back to the disk. */
+  compact(): void {
+    this.db.run(sql`PRAGMA wal_checkpoint(TRUNCATE)`);
+    this.db.run(sql`VACUUM`);
+  }
+
   get(id: number): Run | undefined {
     return this.db.select().from(runs).where(eq(runs.id, id)).get();
   }

@@ -218,6 +218,11 @@ export class Runner {
     return this.#active.size > 0;
   }
 
+  /** Run ids in progress (their debug folders are in use). */
+  activeRunIds(): number[] {
+    return [...this.#active.values()].flatMap((a) => (a.runId ? [a.runId] : []));
+  }
+
   isRunning(connectionId: string): boolean {
     return this.#active.has(connectionId);
   }

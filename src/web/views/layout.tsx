@@ -86,6 +86,9 @@ button.link:hover { color: var(--fg); }
 .login form { display: grid; gap: 14px; }
 .login label { display: grid; gap: 4px; font-weight: 500; }
 .login button[type=submit] { padding: 9px 12px; margin-top: 4px; }
+table.storage td:nth-child(2) { white-space: nowrap; }
+table.storage td:last-child { text-align: right; }
+table.storage td:last-child form { justify-content: flex-end; }
 .pager { display: flex; gap: 14px; align-items: center; justify-content: center; margin: 10px 0 0; font-size: 13px; }
 .mfa.attention { border-width: 2px; animation: attention 1.6s ease-in-out 3; }
 @keyframes attention { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn) 35%, transparent); } }
