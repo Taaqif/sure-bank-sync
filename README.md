@@ -17,7 +17,8 @@ Drizzle, croner.
 cron (per connection) → Playwright logs into bank → fetch transactions
   → record bank accounts seen → map to Sure accounts (set in UI)
   → skip pending / already synced
-  → POST /api/v1/transactions (external_id + source = idempotent)
+  → one CSV import per Sure account: POST /api/v1/imports (publish=true)
+  → poll the import until Sure reports complete, then mark rows synced
 ```
 
 - **Config lives in the database**, edited in the UI: Sure URL and defaults,
@@ -27,8 +28,11 @@ cron (per connection) → Playwright logs into bank → fetch transactions
 - **Account mapping**: after a connection's first run, the bank accounts it
   found are listed with a dropdown of your Sure accounts. Unmapped accounts are
   skipped (not lost): map them and run again.
-- **Dedupe**: a local record of what was sent, plus Sure's own `external_id`
-  check, so re-runs and overlapping lookback windows are safe.
+- **Imports, not single transactions**: rows go to Sure through its CSV import
+  API, so they show up under Imports in Sure and can be reverted there as a batch.
+- **Dedupe**: a local record of what Sure confirmed, plus Sure's import
+  matching (date + amount + currency + name updates an existing entry instead
+  of duplicating), so re-runs and overlapping lookback windows are safe.
 - **MFA**: when a bank asks for a code the run pauses and the dashboard shows
   an input box.
 - **Remembered device**: each connection keeps its own browser profile in

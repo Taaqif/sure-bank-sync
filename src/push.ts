@@ -1,14 +1,24 @@
-/** Map scraped transactions to Sure accounts, drop what's already synced, push the rest. */
+/**
+ * Map scraped transactions to Sure accounts, drop what's already synced, and
+ * send the rest to Sure as one CSV import per Sure account.
+ */
 import { assignExternalIds, formatCents, type BankAccount, type BankTransaction, type IdentifiedTransaction } from "./models.js";
 import type { RunStats, RunStore } from "./runs.js";
 import type { ConfigStore, Connection, Settings } from "./store.js";
-import { SureClient, SureError } from "./sureClient.js";
+import { SureClient, SureError, toImportCsv, type SureImport } from "./sureClient.js";
 
 export interface PushDeps {
   store: ConfigStore;
   runs: RunStore;
   fetch?: typeof fetch;
+  /** how long to wait for Sure to finish an import (ms) */
+  importTimeoutMs?: number;
+  /** delay between import status checks (ms) */
+  pollMs?: number;
 }
+
+const DONE = new Set(["complete"]);
+const FAILED = new Set(["failed", "revert_failed", "reverted"]);
 
 export async function pushTransactions(
   deps: PushDeps,
@@ -67,11 +77,15 @@ export async function pushTransactions(
       if (!(e instanceof SureError)) throw e;
       log(`[dry run] couldn't read Sure accounts (${e.message}); showing ids`);
     }
-    log(`[dry run] would push ${todo.length} transactions to Sure (nothing written)`);
+    const groups = new Map<string, number>();
+    for (const [accountId] of todo) groups.set(accountId, (groups.get(accountId) ?? 0) + 1);
+    for (const [accountId, n] of groups) {
+      log(`[dry run] would import ${n} transactions into ${names.get(accountId) ?? accountId} as one CSV import (nothing written)`);
+    }
     for (const [accountId, t] of todo) {
       const nature = t.amountCents > 0 ? "income " : "expense";
       log(
-        `[dry run] would create ${t.date} ${nature} ${formatCents(Math.abs(t.amountCents)).padStart(10)} ` +
+        `[dry run] would import ${t.date} ${nature} ${formatCents(Math.abs(t.amountCents)).padStart(10)} ` +
           `${t.description} → ${names.get(accountId) ?? accountId}`,
       );
       stats.created++;
@@ -79,10 +93,40 @@ export async function pushTransactions(
     return;
   }
 
-  log(`pushing ${todo.length} transactions to Sure`);
-  for (const [accountId, t] of todo) {
-    const entry = await sure.createTransaction(accountId, t);
-    deps.runs.markSynced(conn.id, t.externalId, accountId, entry?.id ? String(entry.id) : null);
-    stats.created++;
+  // One import per Sure account.
+  const byAccount = new Map<string, IdentifiedTransaction[]>();
+  for (const [accountId, t] of todo) byAccount.set(accountId, [...(byAccount.get(accountId) ?? []), t]);
+
+  for (const [accountId, rows] of byAccount) {
+    log(`importing ${rows.length} transactions into Sure account ${accountId}`);
+    const created = await sure.createTransactionImport(accountId, toImportCsv(rows));
+    const result = await waitForImport(sure, created, deps, log);
+    if (result.status === "timeout") {
+      log(`import ${created.id} still running; not marking as synced (Sure dedupes if it's sent again)`);
+      continue;
+    }
+    for (const t of rows) deps.runs.markSynced(conn.id, t.externalId, accountId, `import:${created.id}`);
+    stats.created += rows.length;
+    log(`import ${created.id} complete (${rows.length} rows)`);
+  }
+}
+
+async function waitForImport(
+  sure: SureClient,
+  imp: SureImport,
+  deps: PushDeps,
+  log: (m: string) => void,
+): Promise<{ status: "complete" | "timeout" }> {
+  const deadline = Date.now() + (deps.importTimeoutMs ?? 120_000);
+  let current = imp;
+  while (true) {
+    if (DONE.has(current.status)) return { status: "complete" };
+    if (FAILED.has(current.status)) {
+      throw new SureError(`Sure import ${imp.id} ${current.status}${current.error ? `: ${current.error}` : ""}`);
+    }
+    if (Date.now() > deadline) return { status: "timeout" };
+    await new Promise((r) => setTimeout(r, deps.pollMs ?? 2000));
+    current = await sure.getImport(imp.id);
+    log(`import ${imp.id}: ${current.status}`);
   }
 }

@@ -144,25 +144,56 @@ describe("push", () => {
     expect(sure.calls).toHaveLength(0);
     expect(env.store.bankAccounts(conn.id).map((a) => a.bankAccountId).sort()).toEqual([ACCT.id, card.id].sort());
 
-    // Map one, ignore the other -> 3 sent
+    // Map one, ignore the other -> one CSV import with 3 rows
     env.store.setMapping(conn.id, ACCT.id, "acct-1", false);
     env.store.setMapping(conn.id, card.id, null, true);
     s = emptyStats();
-    await pushTransactions(deps, conn, settings, batch, s, () => {});
+    await pushTransactions({ ...deps, pollMs: 1 }, conn, settings, batch, s, () => {});
     expect(s).toEqual({ fetched: 0, created: 3, skipped: 0, unmapped: 0 });
 
-    const bodies = sure.calls.map((c) => c.body.transaction);
-    expect(sure.calls[0]!.headers.get("X-Api-Key")).toBe("key-123");
-    expect(bodies.find((b) => b.name === "SALARY")).toMatchObject({ nature: "income", amount: "2500.00" });
-    expect(bodies.find((b) => b.name === "COFFEE")).toMatchObject({ nature: "expense", amount: "4.50" });
-    expect(bodies.every((b) => b.account_id === "acct-1" && b.source === "sure-bank-sync")).toBe(true);
+    const posts = sure.calls.filter((c) => c.method === "POST");
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.url).toBe("http://sure.test/api/v1/imports");
+    expect(posts[0]!.headers.get("X-Api-Key")).toBe("key-123");
+    expect(posts[0]!.body).toMatchObject({
+      type: "TransactionImport",
+      account_id: "acct-1",
+      date_format: "%Y-%m-%d",
+      signage_convention: "inflows_positive",
+      publish: "true",
+    });
+    expect(posts[0]!.body.raw_file_content).toBe(
+      "date,amount,name\n2026-11-01,-4.50,COFFEE\n2026-11-01,-4.50,COFFEE\n2026-11-01,2500.00,SALARY\n",
+    );
 
     // Re-run: already synced locally, no API calls
     s = emptyStats();
+    const before = sure.calls.length;
     await pushTransactions(deps, conn, settings, batch, s, () => {});
     expect(s.created).toBe(0);
     expect(s.skipped).toBe(3);
-    expect(sure.calls).toHaveLength(3);
+    expect(sure.calls).toHaveLength(before);
+  });
+
+  it("doesn't mark rows synced when the import fails or is still running", async () => {
+    const env = setup();
+    const conn = env.store.connection("alice-anz")!;
+    env.store.recordBankAccounts(conn.id, [ACCT]);
+    env.store.setMapping(conn.id, ACCT.id, "acct-1", false);
+
+    const failing = fakeSure(undefined, "failed");
+    await expect(
+      pushTransactions({ store: env.store, runs: env.runs, fetch: failing.fetch, pollMs: 1 }, conn, env.store.settings(), [txn()], emptyStats(), () => {}),
+    ).rejects.toThrow(/import .* failed/);
+
+    const slow = fakeSure(undefined, "importing");
+    const s = emptyStats();
+    await pushTransactions(
+      { store: env.store, runs: env.runs, fetch: slow.fetch, pollMs: 1, importTimeoutMs: 20 },
+      conn, env.store.settings(), [txn()], s, () => {},
+    );
+    expect(s.created).toBe(0);
+    expect(env.runs.alreadySynced(conn.id, assignExternalIds([txn()]).map((t) => t.externalId)).size).toBe(0);
   });
 });
 
@@ -180,13 +211,14 @@ describe("dry run", () => {
     await pushTransactions(deps, conn, env.store.settings(), [txn(), txn("SALARY", 250000)], s, (m) => lines.push(m), true);
     expect(s.created).toBe(2);
     expect(sure.calls.every((c) => c.method === "GET")).toBe(true);
-    expect(lines.some((l) => l.includes("would create 2026-11-01 income     2500.00 SALARY → Joint Everyday"))).toBe(true);
+    expect(lines.some((l) => l.includes("would import 2026-11-01 income     2500.00 SALARY → Joint Everyday"))).toBe(true);
+    expect(lines.some((l) => l.includes("would import 2 transactions into Joint Everyday as one CSV import"))).toBe(true);
 
     // A real run afterwards still sends both
     s = emptyStats();
-    await pushTransactions(deps, conn, env.store.settings(), [txn(), txn("SALARY", 250000)], s, () => {});
+    await pushTransactions({ ...deps, pollMs: 1 }, conn, env.store.settings(), [txn(), txn("SALARY", 250000)], s, () => {});
     expect(s.created).toBe(2);
-    expect(sure.calls.filter((c) => c.method === "POST")).toHaveLength(2);
+    expect(sure.calls.filter((c) => c.method === "POST")).toHaveLength(1);
   });
 });
 

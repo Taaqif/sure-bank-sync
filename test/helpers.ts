@@ -31,14 +31,21 @@ export function setup() {
 }
 
 /** Records Sure API calls; dedupes on external_id like the real thing. */
-export function fakeSure(accounts = [{ id: "acct-1", name: "Joint Everyday", currency: "AUD" }]) {
+export function fakeSure(
+  accounts = [{ id: "acct-1", name: "Joint Everyday", currency: "AUD" }],
+  importStatus = "complete",
+) {
   const calls: { method: string; url: string; headers: Headers; body: any }[] = [];
   const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     calls.push({ method: init?.method ?? "GET", url, headers: new Headers(init?.headers), body });
     if (url.includes("/accounts")) return Response.json({ accounts });
-    return Response.json({ id: `e-${calls.length}` }, { status: 201 });
+    if (url.endsWith("/imports") && init?.method === "POST") {
+      return Response.json({ data: { id: `imp-${calls.length}`, status: "importing" } }, { status: 201 });
+    }
+    if (/\/imports\/[^/]+$/.test(url)) return Response.json({ data: { id: url.split("/").pop(), status: importStatus } });
+    return Response.json({ error: "not_found" }, { status: 404 });
   }) as typeof fetch;
   return { calls, fetch: fetchImpl };
 }

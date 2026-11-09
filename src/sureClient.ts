@@ -48,23 +48,45 @@ export class SureClient {
   }
 
   /**
-   * Create a transaction. Idempotent: Sure returns the existing entry (HTTP 200)
-   * when external_id + source already exist on the account.
+   * Create a CSV transaction import into one account and ask Sure to publish it.
+   * Sure matches existing entries on date + amount + currency + name and
+   * updates them instead of duplicating.
    */
-  async createTransaction(sureAccountId: string, txn: IdentifiedTransaction): Promise<{ id?: string } | null> {
-    return this.request("POST", "/transactions", {
-      transaction: {
-        account_id: sureAccountId,
-        date: txn.date,
-        amount: formatCents(Math.abs(txn.amountCents)),
-        name: txn.description.slice(0, 255),
-        currency: txn.account.currency,
-        nature: txn.amountCents > 0 ? "income" : "expense",
-        external_id: txn.externalId,
-        source: this.source,
-      },
+  async createTransactionImport(sureAccountId: string, csv: string): Promise<SureImport> {
+    const res = await this.request<{ data: SureImport }>("POST", "/imports", {
+      type: "TransactionImport",
+      account_id: sureAccountId,
+      raw_file_content: csv,
+      col_sep: ",",
+      date_col_label: "date",
+      amount_col_label: "amount",
+      name_col_label: "name",
+      date_format: "%Y-%m-%d",
+      number_format: "1,234.56",
+      amount_type_strategy: "signed_amount",
+      signage_convention: "inflows_positive",
+      publish: "true",
     });
+    return res.data;
   }
+
+  async getImport(id: string): Promise<SureImport> {
+    return (await this.request<{ data: SureImport }>("GET", `/imports/${encodeURIComponent(id)}`)).data;
+  }
+}
+
+export interface SureImport {
+  id: string;
+  status: string;
+  error?: string;
+  stats?: { rows_count?: number; valid_rows_count?: number; invalid_rows_count?: number };
+}
+
+/** Rows -> CSV for a Sure TransactionImport: date (YYYY-MM-DD), signed amount (inflows positive), name. */
+export function toImportCsv(txns: IdentifiedTransaction[]): string {
+  const q = (s: string) => (/[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
+  const lines = txns.map((t) => [t.date, formatCents(t.amountCents), q(t.description.slice(0, 255))].join(","));
+  return ["date,amount,name", ...lines].join("\n") + "\n";
 }
 
 function describe(e: unknown): string {
