@@ -278,6 +278,19 @@ describe("web", () => {
     expect(existsSync(profile)).toBe(false);
   });
 
+  it("serves the connection page's live parts", async () => {
+    const env = setup();
+    const { app } = makeApp(env);
+    const page = await (await get(app, "/connections/alice-anz")).text();
+    expect(page).toContain('id="conn-actions"');
+    const scripts = [...page.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]!);
+    for (const s of scripts) expect(() => new Function(s)).not.toThrow();
+    const live = await (await get(app, "/connections/alice-anz/partials/live")).text();
+    expect(live).toContain('id="conn-actions"');
+    expect(live).toContain('id="conn-runs"');
+    expect((await get(app, "/connections/nope/partials/live")).status).toBe(404);
+  });
+
   it("cleans up old runs and debug files from settings", async () => {
     const env = setup();
     const { app } = makeApp(env);

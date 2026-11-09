@@ -133,6 +133,22 @@ export const macquarie: ProviderDefinition = {
 
     const bodyText = () => page.locator("body").innerText().catch(() => "");
 
+    /**
+     * Is the robot check showing? It can sit in an embedded frame (Akamai's
+     * challenge), so check every frame's text and the challenge URL too.
+     */
+    async function robotShown(text?: string): Promise<boolean> {
+      if (/akamai_challenge/i.test(page.url())) return true;
+      if (ROBOT_TEXT.test(text ?? (await bodyText()))) return true;
+      for (const frame of page.frames()) {
+        if (frame === page.mainFrame()) continue;
+        if (/sec-cpt/i.test(frame.url())) return true;
+        const t = await frame.locator("body").innerText({ timeout: 1000 }).catch(() => "");
+        if (ROBOT_TEXT.test(t)) return true;
+      }
+      return false;
+    }
+
     type State = "logged_in" | "code" | "app" | "robot" | "trust" | "rejected" | "unknown";
     async function state(timeout = 30_000): Promise<State> {
       const deadline = Date.now() + timeout;
@@ -141,7 +157,7 @@ export const macquarie: ProviderDefinition = {
         if (/#\/trust-browser/.test(page.url())) return "trust";
         const text = await bodyText();
         if (ERROR_TEXT.test(text)) return "rejected";
-        if (ROBOT_TEXT.test(text)) return "robot";
+        if (await robotShown(text)) return "robot";
         if (await visible(page.locator(SEL.code).locator("visible=true"))) return "code";
         // Only once the login form is gone: the login page itself mentions the app in a notice.
         const onForm = await visible(page.locator(SEL.password));
@@ -338,7 +354,7 @@ export const macquarie: ProviderDefinition = {
             await ctx.requestBrowserHelp(
               page,
               "Macquarie wants you to confirm you're not a robot. Tick the box (and solve any picture puzzle), then press Continue. The run continues once it's gone.",
-              async () => (await loggedIn()) || !ROBOT_TEXT.test(await bodyText()),
+              async () => (await loggedIn()) || !(await robotShown()),
             );
             await settle(page);
             continue;

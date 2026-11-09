@@ -669,26 +669,16 @@ export const ConnectionNewPage = (p: {
   </Layout>
 );
 
-export const ConnectionPage = (p: {
-  conn: Connection;
-  provider?: ProviderDefinition;
-  users: User[];
-  accounts: BankAccountRow[];
-  sureAccounts: SureAccount[];
-  sureError?: string;
-  runs: RunsPage;
-  running: boolean;
-  settings: Settings;
-  msg?: string;
-}) => {
-  const known = new Set(p.sureAccounts.map((a) => a.id));
+/** Connection title and run buttons (refreshed live). */
+export const ConnActions = (p: { conn: Connection; provider?: ProviderDefinition; running: boolean }) => {
   const ui = useContext(UiContext);
   return (
-    <Layout title={p.conn.id} nav="dashboard" msg={p.msg} script={SCHEDULE_JS}>
-      <div class="row between">
-        <h2>
-          {p.conn.userName} · {p.conn.id} <span class="muted">({p.provider?.label ?? p.conn.provider})</span>
-        </h2>
+    <div id="conn-actions" class="row between" data-running={p.running ? "1" : undefined}>
+      <h2>
+        {p.conn.userName} · {p.conn.id} <span class="muted">({p.provider?.label ?? p.conn.provider})</span>
+        <LiveBadge title="Updating live" />
+      </h2>
+      <div class="row">
         <form method="post" action={`/connections/${p.conn.id}/run`} class="row">
           {ui.debugTools && (
             <button type="submit" class="secondary" name="debug" value="1" disabled={p.running} title="Dry run with a visible, slowed-down browser; captures network data and keeps downloads">
@@ -705,6 +695,67 @@ export const ConnectionPage = (p: {
         </form>
         {p.running && <CancelButton connectionId={p.conn.id} />}
       </div>
+    </div>
+  );
+};
+
+/** The connection's run table (refreshed live). */
+export const ConnRuns = (p: { conn: Connection; runs: RunsPage }) => (
+  <div id="conn-runs">
+    <h2 id="runs">
+      Runs
+      <LiveBadge title="Updating live" />
+    </h2>
+    <RunsTable {...p.runs} href={(n) => `/connections/${encodeURIComponent(p.conn.id)}${n > 1 ? `?runs=${n}` : ""}#runs`} />
+  </div>
+);
+
+/*
+ * Connection page: refresh the run buttons and the runs table every 2s while
+ * a run is going (10s otherwise, 15s in a background tab). Forms elsewhere on
+ * the page (mapping, edit) are left alone.
+ */
+const CONN_LIVE_JS = `
+(() => {
+  const id = document.getElementById("conn").dataset.id;
+  let timer;
+  async function poll() {
+    try {
+      const r = await fetch("/connections/" + encodeURIComponent(id) + "/partials/live" + location.search, { credentials: "same-origin" });
+      if (r.ok) {
+        const doc = new DOMParser().parseFromString(await r.text(), "text/html");
+        for (const part of ["conn-actions", "conn-runs"]) {
+          const fresh = doc.getElementById(part);
+          const old = document.getElementById(part);
+          if (fresh && old && fresh.innerHTML !== old.innerHTML) old.replaceWith(fresh);
+        }
+      }
+    } catch {}
+    const running = !!document.querySelector("#conn-actions[data-running]");
+    timer = setTimeout(poll, document.hidden ? 15000 : running ? 2000 : 10000);
+  }
+  window.refreshLive = () => { clearTimeout(timer); poll(); };
+  timer = setTimeout(poll, 2000);
+})();`;
+
+export const ConnectionPage = (p: {
+  conn: Connection;
+  provider?: ProviderDefinition;
+  users: User[];
+  accounts: BankAccountRow[];
+  sureAccounts: SureAccount[];
+  sureError?: string;
+  runs: RunsPage;
+  running: boolean;
+  settings: Settings;
+  msg?: string;
+}) => {
+  const known = new Set(p.sureAccounts.map((a) => a.id));
+  const ui = useContext(UiContext);
+  return (
+    <Layout title={p.conn.id} nav="dashboard" msg={p.msg} script={SCHEDULE_JS + CONN_LIVE_JS}>
+      <div id="conn" data-id={p.conn.id} />
+      <ConnActions conn={p.conn} provider={p.provider} running={p.running} />
 
       <h2 id="accounts">Accounts</h2>
       {p.sureError && <div class="flash error">Couldn't load Sure accounts: {p.sureError}</div>}
@@ -750,8 +801,7 @@ export const ConnectionPage = (p: {
         )}
       </div>
 
-      <h2 id="runs">Runs</h2>
-      <RunsTable {...p.runs} href={(n) => `/connections/${encodeURIComponent(p.conn.id)}${n > 1 ? `?runs=${n}` : ""}#runs`} />
+      <ConnRuns conn={p.conn} runs={p.runs} />
 
       {ui.debugTools && <TrainForm connectionId={p.conn.id} running={p.running} canStartLoggedOut={!!p.provider?.startUrl} />}
 

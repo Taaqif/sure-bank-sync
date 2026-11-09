@@ -25,6 +25,8 @@ import {
   LogsPage,
   type LogEntry,
   ConnectionPage,
+  ConnActions,
+  ConnRuns,
   DashboardPage,
   DashboardStatus,
   RemotePage,
@@ -505,6 +507,19 @@ export function createApp(svc: Services) {
     }
     svc.scheduler.reload();
     return redirect(c, `/connections/${id}`, "Connection added. Run it once to discover accounts, then map them below.");
+  });
+
+  // Live parts of the connection page: run buttons and the runs table.
+  app.get("/connections/:id/partials/live", (c) => {
+    const conn = store.connection(c.req.param("id"));
+    if (!conn) return c.notFound();
+    return page(
+      c,
+      <>
+        <ConnActions conn={conn} provider={PROVIDERS[conn.provider]} running={svc.runner.isRunning(conn.id)} />
+        <ConnRuns conn={conn} runs={runs.page(conn.id, runsPage(c))} />
+      </>,
+    );
   });
 
   app.get("/connections/:id", async (c) => {
