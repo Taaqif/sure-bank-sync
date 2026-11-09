@@ -337,7 +337,14 @@ describe("csv reader", async () => {
 });
 
 describe("amex csv", async () => {
-  const { parseAmexCsv, amexDate } = await import("../src/providers/amex.js");
+  const { parseAmexCsv, amexDate, amexDashboardAccounts } = await import("../src/providers/amex.js");
+  it("lists the dashboard's cards with the same ids as the CSV rows", () => {
+    const text = "Home\n-55501\nThe American Express® Explorer Credit Card\n••••55501\nRemaining Statement Balance";
+    expect(amexDashboardAccounts(text)).toEqual([{ id: "amex-55501", name: "Amex ••55501", currency: "AUD" }]);
+    const csv = "Date,Description,Amount,Account #\n03/10/2026,COFFEE,4.50,XXXX-XXXXXX-55501\n";
+    expect(parseAmexCsv(csv, { id: "amex", name: "Amex card", currency: "AUD" })[0]!.account.id).toBe("amex-55501");
+    expect(amexDashboardAccounts("no cards here")).toEqual([]);
+  });
   const fallback = { id: "amex", name: "Amex card", currency: "AUD" };
   it("parses the extended export, flipping signs and splitting cards", () => {
     const csv = [

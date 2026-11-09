@@ -78,6 +78,19 @@ function cardSuffix(s: string): string {
   return /(\d{4,5})\D*$/.exec(s)?.[1] ?? "";
 }
 
+/** The account the CSV rows and the dashboard both map to for a card ending in `suffix`. */
+export const amexAccount = (suffix: string): BankAccount => ({ id: `amex-${suffix}`, name: `Amex ••${suffix}`, currency: "AUD" });
+
+/**
+ * Cards shown on the dashboard ("••••21002" under the card name, "-21002" in
+ * the card switcher), as accounts. Same ids as the CSV rows.
+ */
+export function amexDashboardAccounts(text: string): BankAccount[] {
+  const suffixes = new Set<string>();
+  for (const m of text.matchAll(/[•·*]{2,}\s*(\d{4,5})\b/g)) suffixes.add(m[1]!);
+  return [...suffixes].map(amexAccount);
+}
+
 /**
  * Parse an Amex AU activity CSV. Header row required; columns matched by name
  * (Date, Description, Amount, plus optional Account #, Card Member, Reference).
@@ -105,7 +118,7 @@ export function parseAmexCsv(text: string, fallback: BankAccount): BankTransacti
     const suffix = raw ? cardSuffix(raw) : "";
     if (!suffix) return fallback;
     let a = accounts.get(suffix);
-    if (!a) accounts.set(suffix, (a = { id: `amex-${suffix}`, name: `Amex ••${suffix}`, currency: "AUD" }));
+    if (!a) accounts.set(suffix, (a = amexAccount(suffix)));
     return a;
   };
 
@@ -350,6 +363,25 @@ export const amex: ProviderDefinition = {
         } finally {
           page.off("response", onResponse);
         }
+      },
+
+      async listAccounts() {
+        if (!/^\/dashboard/.test(new URL(page.url()).pathname)) {
+          await page.goto(DASHBOARD_URL, { waitUntil: "domcontentloaded" });
+          await settle(page);
+        }
+        // The card tiles render after the page loads; wait for a "••••12345".
+        await page
+          .getByText(/[•·*]{2,}\s*\d{4,5}/)
+          .first()
+          .waitFor({ timeout: 30_000 })
+          .catch(() => {});
+        const accounts = amexDashboardAccounts(await page.locator("body").innerText().catch(() => ""));
+        if (!accounts.length) {
+          await snapshot(ctx, "no-cards");
+          throw new ProviderError("Amex: couldn't find a card number on the dashboard (see the screenshot)");
+        }
+        return accounts;
       },
 
       async fetchTransactions(range) {
