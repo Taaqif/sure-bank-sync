@@ -1,8 +1,8 @@
 /** Map scraped transactions to Sure accounts, drop what's already synced, push the rest. */
-import { assignExternalIds, type BankAccount, type BankTransaction, type IdentifiedTransaction } from "./models.js";
+import { assignExternalIds, formatCents, type BankAccount, type BankTransaction, type IdentifiedTransaction } from "./models.js";
 import type { RunStats, RunStore } from "./runs.js";
 import type { ConfigStore, Connection, Settings } from "./store.js";
-import { SureClient } from "./sureClient.js";
+import { SureClient, SureError } from "./sureClient.js";
 
 export interface PushDeps {
   store: ConfigStore;
@@ -17,6 +17,8 @@ export async function pushTransactions(
   txns: BankTransaction[],
   stats: RunStats,
   log: (msg: string) => void,
+  /** read from Sure only; log the writes instead of making them, and don't mark anything synced */
+  dryRun = false,
 ): Promise<void> {
   // Remember every account we saw so it shows up for mapping in the UI.
   const seen = new Map<string, BankAccount>(txns.map((t) => [t.account.id, t.account]));
@@ -54,8 +56,30 @@ export async function pushTransactions(
   stats.skipped = mapped.length - todo.length;
   if (!todo.length) return;
 
-  log(`pushing ${todo.length} transactions to Sure`);
   const sure = new SureClient(settings.sureUrl, deps.store.sureApiKey(conn.userId), settings.sureSource, 30_000, deps.fetch);
+
+  if (dryRun) {
+    // Account names make the log readable; reading is fine in dry run.
+    let names = new Map<string, string>();
+    try {
+      names = new Map((await sure.listAccounts()).map((a) => [a.id, a.name]));
+    } catch (e) {
+      if (!(e instanceof SureError)) throw e;
+      log(`[dry run] couldn't read Sure accounts (${e.message}); showing ids`);
+    }
+    log(`[dry run] would push ${todo.length} transactions to Sure (nothing written)`);
+    for (const [accountId, t] of todo) {
+      const nature = t.amountCents > 0 ? "income " : "expense";
+      log(
+        `[dry run] would create ${t.date} ${nature} ${formatCents(Math.abs(t.amountCents)).padStart(10)} ` +
+          `${t.description} → ${names.get(accountId) ?? accountId}`,
+      );
+      stats.created++;
+    }
+    return;
+  }
+
+  log(`pushing ${todo.length} transactions to Sure`);
   for (const [accountId, t] of todo) {
     const entry = await sure.createTransaction(accountId, t);
     deps.runs.markSynced(conn.id, t.externalId, accountId, entry?.id ? String(entry.id) : null);

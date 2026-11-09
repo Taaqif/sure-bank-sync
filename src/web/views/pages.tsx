@@ -177,6 +177,13 @@ export const SettingsPage = (p: { s: Settings; msg?: string; error?: string }) =
         <label class="check">
           <input type="checkbox" name="skipPending" checked={p.s.skipPending} /> Skip pending transactions
         </label>
+        <label class="check">
+          <input type="checkbox" name="dryRun" checked={p.s.dryRun} /> Dry run mode
+        </label>
+        <small class="hint" style="margin-top:-10px">
+          Every sync scrapes the bank and reads Sure, but only logs the transactions it would create. Nothing is
+          written or marked as synced, so turning this off later imports them for real.
+        </small>
         <label>
           Source tag
           <input type="text" name="sureSource" value={p.s.sureSource} />
@@ -408,7 +415,10 @@ export const ConnectionPage = (p: {
         <h2>
           {p.conn.userName} · {p.conn.id} <span class="muted">({p.provider?.label ?? p.conn.provider})</span>
         </h2>
-        <form method="post" action={`/connections/${p.conn.id}/run`}>
+        <form method="post" action={`/connections/${p.conn.id}/run`} class="row">
+          <button type="submit" class="secondary" name="dryRun" value="1" disabled={p.running} title="Scrape and log what would be sent, write nothing">
+            Dry run now
+          </button>
           <button type="submit" disabled={p.running}>{p.running ? "Running…" : "Run now"}</button>
         </form>
       </div>
@@ -501,12 +511,13 @@ export const RunPage = (p: { run: Run; shots: string[] }) => (
   <Layout title={`Run ${p.run.id}`} nav="dashboard">
     <h2>
       Run #{p.run.id} · <a href={`/connections/${p.run.connectionId}`}>{p.run.connectionId}</a> <Badge status={p.run.status} />
+      {p.run.dryRun && <span class="tag">dry run: nothing written</span>}
     </h2>
     <p class="muted">
       {p.run.trigger} · started {p.run.startedAt}
       {p.run.finishedAt && ` · finished ${p.run.finishedAt}`}
       <br />
-      fetched {p.run.fetched} · new {p.run.created} · already synced {p.run.skipped} · unmapped {p.run.unmapped}
+      fetched {p.run.fetched} · {p.run.dryRun ? "would create" : "new"} {p.run.created} · already synced {p.run.skipped} · unmapped {p.run.unmapped}
     </p>
     {p.run.error && <pre class="failed">{p.run.error}</pre>}
     <h2>Log</h2>
@@ -528,5 +539,68 @@ export const RunPage = (p: { run: Run; shots: string[] }) => (
         </div>
       </>
     )}
+  </Layout>
+);
+
+// --- logs ------------------------------------------------------------------
+
+export interface LogEntry {
+  text: string;
+  level: string;
+}
+
+export function LogLines({ entries }: { entries: LogEntry[] }) {
+  if (!entries.length) return <span class="muted">No log lines match.</span>;
+  return (
+    <>
+      {entries.map((e) => (
+        <div class={`l-${e.level}`}>{e.text}</div>
+      ))}
+    </>
+  );
+}
+
+const LOGS_JS = `
+const box = document.getElementById("logs");
+const form = document.getElementById("logfilter");
+const atBottom = () => box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+box.scrollTop = box.scrollHeight;
+async function refresh() {
+  const follow = atBottom();
+  const q = new URLSearchParams(new FormData(form));
+  try {
+    const r = await fetch("/partials/logs?" + q, { credentials: "same-origin" });
+    if (r.ok) box.innerHTML = await r.text();
+  } catch {}
+  if (follow) box.scrollTop = box.scrollHeight;
+}
+form.addEventListener("change", refresh);
+form.addEventListener("submit", (e) => { e.preventDefault(); refresh(); history.replaceState(null, "", "?" + new URLSearchParams(new FormData(form))); });
+setInterval(() => { if (document.getElementById("live").checked) refresh(); }, 5000);`;
+
+export const LogsPage = (p: { entries: LogEntry[]; level: string; q: string; maxMb: string }) => (
+  <Layout title="Logs" nav="logs" script={LOGS_JS}>
+    <h2>Logs</h2>
+    <div class="card">
+      <form class="toolbar" id="logfilter" method="get" action="/logs">
+        <select name="level">
+          {["debug", "info", "warn", "error"].map((l) => (
+            <option value={l} selected={l === p.level}>
+              {l === "debug" ? "all levels" : `${l} and above`}
+            </option>
+          ))}
+        </select>
+        <input type="text" name="q" value={p.q} placeholder="filter, e.g. alice-anz" />
+        <label class="row">
+          <input type="checkbox" id="live" checked /> live
+        </label>
+        <span class="hint">
+          last 1000 entries · file capped at {p.maxMb} MB, older lines rotated out
+        </span>
+      </form>
+      <pre class="logs" id="logs">
+        <LogLines entries={p.entries} />
+      </pre>
+    </div>
   </Layout>
 );

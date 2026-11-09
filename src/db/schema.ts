@@ -61,6 +61,8 @@ export const runs = sqliteTable(
     connectionId: text("connection_id").notNull(),
     userName: text("user_name").notNull(),
     trigger: text("trigger").$type<"schedule" | "manual">().notNull(),
+    /** nothing was written to Sure; `created` counts would-be writes */
+    dryRun: integer("dry_run", { mode: "boolean" }).notNull().default(false),
     status: text("status").$type<RunStatus>().notNull(),
     startedAt: text("started_at").notNull(),
     finishedAt: text("finished_at"),

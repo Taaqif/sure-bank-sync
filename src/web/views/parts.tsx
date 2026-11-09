@@ -42,7 +42,10 @@ export function RunsTable({ runs }: { runs: Run[] }) {
           <tr>
             <td><a href={`/runs/${r.id}`}>{r.id}</a></td>
             <td>{r.connectionId}</td>
-            <td class="muted">{r.trigger}</td>
+            <td class="muted">
+              {r.trigger}
+              {r.dryRun && <span class="tag">dry run</span>}
+            </td>
             <td><Badge status={r.status} /></td>
             <td>{ago(r.startedAt)}</td>
             <td>{r.fetched}</td>

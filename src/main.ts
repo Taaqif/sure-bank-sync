@@ -3,7 +3,7 @@ import { parseArgs } from "node:util";
 import { serve } from "@hono/node-server";
 import { Crypto, CryptoError, generateKey } from "./crypto.js";
 import { openDb } from "./db/client.js";
-import { logger } from "./log.js";
+import { configureLogFile, logger } from "./log.js";
 import { MfaBroker } from "./mfa.js";
 import { Runner, UnknownConnection } from "./runner.js";
 import { RunStore } from "./runs.js";
@@ -44,6 +44,9 @@ async function main() {
   }
 
   const dataDir = args["data-dir"]!;
+  const envMax = Number(process.env.SURE_SYNC_LOG_MAX_BYTES);
+  const logMaxBytes = Number.isFinite(envMax) && envMax >= 100_000 ? envMax : 5_000_000;
+  configureLogFile(join(dataDir, "logs"), logMaxBytes);
   let store: ConfigStore;
   try {
     const db = openDb(join(dataDir, "state.db"));
@@ -84,6 +87,7 @@ async function main() {
     scheduler,
     mfa,
     dataDir,
+    logMaxBytes,
     admin: password ? { user: process.env.SURE_SYNC_ADMIN_USER ?? "admin", password } : undefined,
   });
   const port = Number(args.port);
@@ -102,6 +106,6 @@ async function main() {
 }
 
 main().catch((e) => {
-  console.error(e);
+  log.error("fatal", e);
   process.exit(1);
 });

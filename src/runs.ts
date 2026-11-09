@@ -21,10 +21,10 @@ export class RunStore {
       .run();
   }
 
-  start(connectionId: string, userName: string, trigger: Run["trigger"]): number {
+  start(connectionId: string, userName: string, trigger: Run["trigger"], dryRun = false): number {
     return this.db
       .insert(runs)
-      .values({ connectionId, userName, trigger, status: "running", startedAt: nowIso() })
+      .values({ connectionId, userName, trigger, dryRun, status: "running", startedAt: nowIso() })
       .returning({ id: runs.id })
       .get().id;
   }
@@ -47,6 +47,11 @@ export class RunStore {
       .set({ status, finishedAt: nowIso(), error, ...stats })
       .where(eq(runs.id, id))
       .run();
+  }
+
+  /** Keep the newest `keep` runs so history (and per-run logs) can't grow forever. */
+  prune(keep: number): void {
+    this.db.run(sql`DELETE FROM runs WHERE id <= (SELECT id FROM runs ORDER BY id DESC LIMIT 1 OFFSET ${keep})`);
   }
 
   get(id: number): Run | undefined {

@@ -165,3 +165,38 @@ describe("push", () => {
     expect(sure.calls).toHaveLength(3);
   });
 });
+
+describe("dry run", () => {
+  it("reads Sure but writes nothing and marks nothing synced", async () => {
+    const env = setup();
+    const sure = fakeSure();
+    const deps = { store: env.store, runs: env.runs, fetch: sure.fetch };
+    const conn = env.store.connection("alice-anz")!;
+    env.store.recordBankAccounts(conn.id, [ACCT]);
+    env.store.setMapping(conn.id, ACCT.id, "acct-1", false);
+    const lines: string[] = [];
+
+    let s = emptyStats();
+    await pushTransactions(deps, conn, env.store.settings(), [txn(), txn("SALARY", 250000)], s, (m) => lines.push(m), true);
+    expect(s.created).toBe(2);
+    expect(sure.calls.every((c) => c.method === "GET")).toBe(true);
+    expect(lines.some((l) => l.includes("would create 2026-11-01 income     2500.00 SALARY → Joint Everyday"))).toBe(true);
+
+    // A real run afterwards still sends both
+    s = emptyStats();
+    await pushTransactions(deps, conn, env.store.settings(), [txn(), txn("SALARY", 250000)], s, () => {});
+    expect(s.created).toBe(2);
+    expect(sure.calls.filter((c) => c.method === "POST")).toHaveLength(2);
+  });
+});
+
+describe("retention", () => {
+  it("prunes old runs", () => {
+    const { runs } = setup();
+    for (let i = 0; i < 12; i++) runs.start("alice-anz", "alice", "manual");
+    runs.prune(5);
+    const left = runs.recent(undefined, 100);
+    expect(left).toHaveLength(5);
+    expect(left[0]!.id).toBe(12);
+  });
+});

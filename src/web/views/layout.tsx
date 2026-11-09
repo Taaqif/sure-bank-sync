@@ -1,5 +1,8 @@
-import type { Child } from "hono/jsx";
+import { createContext, useContext, type Child } from "hono/jsx";
 import { raw } from "hono/html";
+
+/** Request-wide UI state every page can read (set in app.tsx). */
+export const UiContext = createContext({ dryRun: false });
 
 const CSS = `
 :root {
@@ -56,10 +59,17 @@ details summary { cursor: pointer; color: var(--muted); }
 .empty { padding: 24px 16px; color: var(--muted); }
 pre { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; font-size: 12px; white-space: pre-wrap; }
 .err { color: var(--bad); white-space: normal; max-width: 380px; overflow: hidden; text-overflow: ellipsis; }
+.banner { background: var(--warn); color: var(--bg); padding: 6px 20px; font-weight: 600; font-size: 13px; }
+.banner a { color: inherit; }
+.tag { font-size: 11px; padding: 0 6px; border-radius: 4px; border: 1px dashed var(--warn); color: var(--warn); margin-left: 4px; }
+.logs { max-height: 70vh; overflow: auto; margin: 0; border-radius: 0 0 8px 8px; border-width: 1px 0 0; }
+.logs .l-WARN { color: var(--warn); } .logs .l-ERROR { color: var(--bad); } .logs .l-DEBUG { color: var(--muted); }
+.toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 10px 12px; }
+.toolbar input, .toolbar select { width: auto; }
 .shots img { max-width: 100%; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 12px; }
 `;
 
-export type Nav = "dashboard" | "household" | "settings";
+export type Nav = "dashboard" | "household" | "logs" | "settings";
 
 export function Layout(props: { title?: string; nav?: Nav; msg?: string; error?: string; children?: Child; script?: string }) {
   const tab = (n: Nav, href: string, label: string) => (
@@ -68,6 +78,7 @@ export function Layout(props: { title?: string; nav?: Nav; msg?: string; error?:
     </a>
   );
   const msgIsError = props.msg?.startsWith("Error");
+  const ui = useContext(UiContext);
   return (
     <>
       {raw("<!doctype html>")}
@@ -86,9 +97,15 @@ export function Layout(props: { title?: string; nav?: Nav; msg?: string; error?:
               </a>
               {tab("dashboard", "/", "Dashboard")}
               {tab("household", "/users", "Household")}
+              {tab("logs", "/logs", "Logs")}
               {tab("settings", "/settings", "Settings")}
             </nav>
           </header>
+          {ui.dryRun && (
+            <div class="banner">
+              Dry run mode is on: syncs only log what they would send to Sure. <a href="/settings">Turn off in Settings</a>
+            </div>
+          )}
           <main>
             {props.msg && <div class={`flash${msgIsError ? " error" : ""}`}>{props.msg}</div>}
             {props.error && <div class="flash error">{props.error}</div>}

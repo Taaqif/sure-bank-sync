@@ -48,6 +48,8 @@ export const SettingsSchema = z.object({
   lookbackDays: z.coerce.number().int().min(1, "lookback days must be 1-365").max(365, "lookback days must be 1-365"),
   skipPending: z.boolean(),
   mfaTimeoutSeconds: z.coerce.number().int().min(30, "MFA timeout must be 30-3600s").max(3600, "MFA timeout must be 30-3600s"),
+  /** never write to Sure; log what would have been sent */
+  dryRun: z.boolean(),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
@@ -59,6 +61,7 @@ export const DEFAULT_SETTINGS: Settings = {
   lookbackDays: 30,
   skipPending: true,
   mfaTimeoutSeconds: 300,
+  dryRun: false,
 };
 
 export interface User {

@@ -65,7 +65,7 @@ describe("web", () => {
 
     r = await app.request(
       "/settings",
-      form({ sureUrl: "http://sure2", timezone: "UTC", schedule: "bad", lookbackDays: "30", mfaTimeoutSeconds: "300" }),
+      form({ sureUrl: "http://sure2", timezone: "UTC", schedule: "bad", lookbackDays: "30", mfaTimeoutSeconds: "300", dryRun: "on" }),
     );
     expect(r.status).toBe(400);
     expect(await r.text()).toContain("cron needs 5 fields");
@@ -98,6 +98,22 @@ describe("web", () => {
       form({ name: "eve", sureApiKey: "k" }, { ...basic("admin", "s3cret"), Origin: "http://localhost" }),
     );
     expect(ok.status).toBe(303);
+  });
+
+  it("shows logs, dry-run banner and dry-run tag", async () => {
+    const env = setup();
+    const { app } = makeApp(env);
+    const logs = await (await get(app, "/logs?level=warn")).text();
+    expect(logs).toContain("Logs");
+    expect(logs).toContain("warn and above");
+    expect((await get(app, "/partials/logs?q=nothing-matches-this")).status).toBe(200);
+
+    expect(await (await get(app, "/")).text()).not.toContain("Dry run mode is on");
+    env.store.saveSettings({ ...env.store.settings(), dryRun: true });
+    expect(await (await get(app, "/settings")).text()).toContain("Dry run mode is on");
+
+    const runId = env.runs.start("alice-anz", "alice", "manual", true);
+    expect(await (await get(app, `/runs/${runId}`)).text()).toContain("dry run: nothing written");
   });
 
   it("serves captured HTML as plain text", async () => {

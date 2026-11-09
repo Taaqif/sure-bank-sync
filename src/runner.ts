@@ -13,6 +13,7 @@ import { SureError } from "./sureClient.js";
 
 const log = logger("runner");
 const DEBUG_DIRS_KEPT = 30;
+const RUNS_KEPT = 500;
 
 export class AlreadyRunning extends Error {}
 export class UnknownConnection extends Error {}
@@ -63,14 +64,21 @@ export class Runner {
   }
 
   /** Run a sync to completion. Returns the run id. */
-  async run(connectionId: string, trigger: "schedule" | "manual" = "schedule"): Promise<number> {
+  /** Run a sync to completion. `dryRun` defaults to the global setting. Returns the run id. */
+  async run(
+    connectionId: string,
+    trigger: "schedule" | "manual" = "schedule",
+    opts: { dryRun?: boolean } = {},
+  ): Promise<number> {
     const conn = this.store.connection(connectionId);
     if (!conn) throw new UnknownConnection(connectionId);
     if (this.#running.has(connectionId)) throw new AlreadyRunning(connectionId);
     this.#running.add(connectionId);
     try {
-      const runId = this.runs.start(connectionId, conn.userName, trigger);
-      await this.#run(runId, conn, this.store.settings());
+      const settings = this.store.settings();
+      const dryRun = opts.dryRun ?? settings.dryRun;
+      const runId = this.runs.start(connectionId, conn.userName, trigger, dryRun);
+      await this.#run(runId, conn, settings, dryRun);
       return runId;
     } finally {
       this.#running.delete(connectionId);
@@ -78,14 +86,14 @@ export class Runner {
   }
 
   /** Fire and forget (used by "Run now"). */
-  startBackground(connectionId: string): void {
+  startBackground(connectionId: string, opts: { dryRun?: boolean } = {}): void {
     if (this.isRunning(connectionId)) return;
-    this.run(connectionId, "manual").catch((e) => {
+    this.run(connectionId, "manual", opts).catch((e) => {
       if (!(e instanceof AlreadyRunning)) log.error(`background run of ${connectionId} failed`, e);
     });
   }
 
-  async #run(runId: number, conn: Connection, settings: Settings): Promise<void> {
+  async #run(runId: number, conn: Connection, settings: Settings, dryRun: boolean): Promise<void> {
     const rlog = (msg: string) => {
       log.info(`[${conn.id} #${runId}] ${msg}`);
       const t = new Date().toLocaleTimeString("en-GB", { timeZone: settings.timezone, hour12: false });
@@ -102,14 +110,18 @@ export class Runner {
       if (missing.length) throw new ProviderError(`missing credentials: ${missing.join(", ")}`);
 
       const range = dateRange(settings.timezone, conn.lookbackDays ?? settings.lookbackDays);
+      if (dryRun) rlog("DRY RUN: nothing will be written to Sure");
       rlog(`waiting for browser slot (${conn.provider}, ${range.since} → ${range.until})`);
       const txns = await this.#browsers.use(() => this.#scrape(runId, conn, settings, creds, debugDir, range, rlog));
       stats.fetched = txns.length;
       rlog(`fetched ${txns.length} transactions`);
 
-      await pushTransactions({ store: this.store, runs: this.runs }, conn, settings, txns, stats, rlog);
+      await pushTransactions({ store: this.store, runs: this.runs }, conn, settings, txns, stats, rlog, dryRun);
       this.runs.finish(runId, "success", stats);
-      rlog(`done: ${stats.created} new, ${stats.skipped} already synced, ${stats.unmapped} unmapped`);
+      rlog(
+        `done${dryRun ? " (dry run)" : ""}: ${stats.created} ${dryRun ? "would be created" : "new"}, ` +
+          `${stats.skipped} already synced, ${stats.unmapped} unmapped`,
+      );
     } catch (e) {
       const expected = e instanceof ProviderError || e instanceof SureError;
       const msg = e instanceof Error ? (expected ? e.message : `${e.name}: ${e.message}`) : String(e);
@@ -117,6 +129,7 @@ export class Runner {
       if (!expected) log.error(`run ${runId} crashed`, e);
       this.runs.finish(runId, "failed", stats, msg);
     } finally {
+      this.runs.prune(RUNS_KEPT);
       await this.#pruneDebug();
     }
   }

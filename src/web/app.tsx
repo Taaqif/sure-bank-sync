@@ -2,6 +2,8 @@ import { readFile, readdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import { Hono, type Context } from "hono";
+import type { Child } from "hono/jsx";
+import { logger, tailLog } from "../log.js";
 import type { MfaBroker } from "../mfa.js";
 import { PROVIDERS } from "../providers/index.js";
 import type { Runner } from "../runner.js";
@@ -9,8 +11,12 @@ import type { RunStore } from "../runs.js";
 import type { Scheduler } from "../scheduler.js";
 import { ValidationError, type ConfigStore, type ConnectionInput } from "../store.js";
 import { SureClient, SureError, type SureAccount } from "../sureClient.js";
+import { UiContext } from "./views/layout.js";
 import {
   ConnectionNewPage,
+  LogLines,
+  LogsPage,
+  type LogEntry,
   ConnectionPage,
   DashboardPage,
   DashboardStatus,
@@ -30,9 +36,13 @@ export interface Services {
   mfa: MfaBroker;
   dataDir: string;
   admin?: { user: string; password: string };
+  /** shown on the logs page */
+  logMaxBytes?: number;
   /** for tests */
   fetch?: typeof fetch;
 }
+
+const log = logger("web");
 
 type Body = Record<string, string | File | (string | File)[]>;
 const str = (b: Body, k: string): string => {
@@ -92,6 +102,8 @@ export function createApp(svc: Services) {
   });
 
   const msgOf = (c: Context) => c.req.query("msg");
+  const page = (c: Context, node: Child, status?: 200 | 400) =>
+    c.html(<UiContext.Provider value={{ dryRun: store.settings().dryRun }}>{node}</UiContext.Provider>, status);
   const removeProfile = (id: string) => rm(join(svc.dataDir, "browser", id), { recursive: true, force: true });
   const sureClient = (userId: number, timeoutMs: number) => {
     const s = store.settings();
@@ -119,8 +131,8 @@ export function createApp(svc: Services) {
   });
 
   // --- status ---------------------------------------------------------------
-  app.get("/", (c) => c.html(<DashboardPage {...dashboard()} msg={msgOf(c)} />));
-  app.get("/partials/status", (c) => c.html(<DashboardStatus {...dashboard()} />));
+  app.get("/", (c) => page(c, <DashboardPage {...dashboard()} msg={msgOf(c)} />));
+  app.get("/partials/status", (c) => page(c, <DashboardStatus {...dashboard()} />));
 
   app.get("/api/status", (c) =>
     c.json(
@@ -141,7 +153,7 @@ export function createApp(svc: Services) {
   );
 
   // --- settings -------------------------------------------------------------
-  app.get("/settings", (c) => c.html(<SettingsPage s={store.settings()} msg={msgOf(c)} />));
+  app.get("/settings", (c) => page(c, <SettingsPage s={store.settings()} msg={msgOf(c)} />));
 
   app.post("/settings", async (c) => {
     const b = await c.req.parseBody();
@@ -153,13 +165,14 @@ export function createApp(svc: Services) {
       lookbackDays: str(b, "lookbackDays"),
       skipPending: b.skipPending === "on",
       mfaTimeoutSeconds: str(b, "mfaTimeoutSeconds"),
+      dryRun: b.dryRun === "on",
     };
     try {
       store.saveSettings(input);
     } catch (e) {
       if (!(e instanceof ValidationError)) throw e;
       const shown = { ...store.settings(), ...input, lookbackDays: Number(input.lookbackDays), mfaTimeoutSeconds: Number(input.mfaTimeoutSeconds) };
-      return c.html(<SettingsPage s={shown} error={e.message} />, 400);
+      return page(c, <SettingsPage s={shown} error={e.message} />, 400);
     }
     svc.scheduler.reload();
     return redirect(c, "/settings", "Settings saved");
@@ -169,7 +182,7 @@ export function createApp(svc: Services) {
   app.get("/users", (c) => {
     const conns = store.connections();
     const users = store.users().map((user) => ({ user, conns: conns.filter((x) => x.userId === user.id) }));
-    return c.html(<UsersPage users={users} msg={msgOf(c)} />);
+    return page(c, <UsersPage users={users} msg={msgOf(c)} />);
   });
 
   app.post("/users", async (c) => {
@@ -187,7 +200,7 @@ export function createApp(svc: Services) {
     const id = Number(c.req.param("id"));
     const user = store.user(id);
     if (!user) return c.notFound();
-    return c.html(<UserPage user={user} conns={store.connections().filter((x) => x.userId === id)} msg={msgOf(c)} />);
+    return page(c, <UserPage user={user} conns={store.connections().filter((x) => x.userId === id)} msg={msgOf(c)} />);
   });
 
   app.post("/users/:id{[0-9]+}", async (c) => {
@@ -257,7 +270,8 @@ export function createApp(svc: Services) {
   app.get("/connections/new", (c) => {
     const provider = PROVIDERS[c.req.query("provider") ?? ""] ?? Object.values(PROVIDERS)[0]!;
     const userId = c.req.query("userId");
-    return c.html(
+    return page(
+      c,
       <ConnectionNewPage
         users={store.users()}
         providers={Object.values(PROVIDERS)}
@@ -302,7 +316,8 @@ export function createApp(svc: Services) {
         sureError = e.message;
       }
     }
-    return c.html(
+    return page(
+      c,
       <ConnectionPage
         conn={conn}
         provider={PROVIDERS[conn.provider]}
@@ -353,10 +368,11 @@ export function createApp(svc: Services) {
     return redirect(c, "/", `Deleted ${id}`);
   });
 
-  app.post("/connections/:id/run", (c) => {
+  app.post("/connections/:id/run", async (c) => {
     const id = c.req.param("id");
     if (!store.connection(id)) return c.notFound();
-    svc.runner.startBackground(id);
+    const b = await c.req.parseBody();
+    svc.runner.startBackground(id, b.dryRun === "1" ? { dryRun: true } : {});
     const back = c.req.header("referer");
     let path = "/";
     try {
@@ -371,12 +387,31 @@ export function createApp(svc: Services) {
     return redirect(c, "/");
   });
 
+  // --- logs -----------------------------------------------------------------
+  const LEVEL_RANK: Record<string, number> = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
+  function logEntries(c: Context): { entries: LogEntry[]; level: string; q: string } {
+    const level = ["debug", "info", "warn", "error"].includes(c.req.query("level") ?? "") ? c.req.query("level")! : "debug";
+    const q = (c.req.query("q") ?? "").trim();
+    const minRank = LEVEL_RANK[level.toUpperCase()] ?? 0;
+    const needle = q.toLowerCase();
+    const entries = tailLog(5000)
+      .map((text) => ({ text, level: /^\S+ (\w+)/.exec(text)?.[1] ?? "INFO" }))
+      .filter((e) => (LEVEL_RANK[e.level] ?? 1) >= minRank && (!needle || e.text.toLowerCase().includes(needle)))
+      .slice(-1000);
+    return { entries, level, q };
+  }
+
+  app.get("/logs", (c) =>
+    page(c, <LogsPage {...logEntries(c)} maxMb={((svc.logMaxBytes ?? 0) / 1_000_000).toFixed(1)} />),
+  );
+  app.get("/partials/logs", (c) => c.html(<LogLines entries={logEntries(c).entries} />));
+
   // --- runs -----------------------------------------------------------------
   app.get("/runs/:id{[0-9]+}", async (c) => {
     const run = runs.get(Number(c.req.param("id")));
     if (!run) return c.notFound();
     const files = await readdir(join(svc.dataDir, "debug", `run-${run.id}`)).catch(() => [] as string[]);
-    return c.html(<RunPage run={run} shots={files.filter((f) => f.endsWith(".png")).sort()} />);
+    return page(c, <RunPage run={run} shots={files.filter((f) => f.endsWith(".png")).sort()} />);
   });
 
   app.get("/runs/:id{[0-9]+}/debug/:name", async (c) => {
@@ -391,7 +426,7 @@ export function createApp(svc: Services) {
   });
 
   app.onError((e, c) => {
-    console.error(e);
+    log.error(`${c.req.method} ${c.req.path} failed`, e);
     return c.text(`Internal error: ${e.message}`, 500);
   });
 
