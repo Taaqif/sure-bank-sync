@@ -47,6 +47,8 @@ export const SettingsSchema = z.object({
   schedule: z.string(),
   skipPending: z.boolean(),
   mfaTimeoutSeconds: z.coerce.number().int().min(30, "MFA timeout must be 30-3600s").max(3600, "MFA timeout must be 30-3600s"),
+  /** runs with a browser working at the same time (runs waiting for a person don't count, up to the same number again) */
+  maxBrowsers: z.coerce.number().int().min(1, "Browsers at once must be 1-4").max(4, "Browsers at once must be 1-4"),
   /** never write to Sure; log what would have been sent */
   dryRun: z.boolean(),
   /** save the browser's network log with failed runs' debug files (debug runs always do) */
@@ -63,6 +65,7 @@ export const DEFAULT_SETTINGS: Settings = {
   schedule: "0 6 * * *",
   skipPending: true,
   mfaTimeoutSeconds: 300,
+  maxBrowsers: 2,
   dryRun: false,
   saveNetworkLog: false,
   verboseLogs: false,

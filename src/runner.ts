@@ -146,36 +146,55 @@ function recordBrowser(browser: BrowserContext, timezone: string) {
   };
 }
 
-class Semaphore {
-  #free: number;
+/**
+ * Counting lock whose size can change (read on every acquire/release).
+ * Waiters are served first come, first served.
+ */
+export class Slots {
+  #used = 0;
   #waiters: (() => void)[] = [];
-  constructor(n: number) {
-    this.#free = n;
+  constructor(private readonly capacity: () => number) {}
+
+  get used(): number {
+    return this.#used;
   }
-  /** Run `fn` once a slot is free. Aborting `signal` while queued gives up the place in line. */
-  async use<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+
+  /** True when a slot is free right now (no queue). */
+  get available(): boolean {
+    return this.#waiters.length === 0 && this.#used < this.capacity();
+  }
+
+  /** Take a slot, waiting in line if needed. Aborting `signal` gives up the place in line. */
+  async acquire(signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted();
-    if (this.#free > 0) this.#free--;
-    else {
-      await new Promise<void>((resolve, reject) => {
-        const waiter = () => {
-          signal?.removeEventListener("abort", onAbort);
-          resolve();
-        };
-        const onAbort = () => {
-          this.#waiters = this.#waiters.filter((w) => w !== waiter);
-          reject(signal!.reason);
-        };
-        this.#waiters.push(waiter);
-        signal?.addEventListener("abort", onAbort, { once: true });
-      });
+    if (this.available) {
+      this.#used++;
+      return;
     }
-    try {
-      return await fn();
-    } finally {
-      const next = this.#waiters.shift();
-      if (next) next();
-      else this.#free++;
+    await new Promise<void>((resolve, reject) => {
+      const waiter = () => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve();
+      };
+      const onAbort = () => {
+        this.#waiters = this.#waiters.filter((w) => w !== waiter);
+        reject(signal!.reason);
+      };
+      this.#waiters.push(waiter);
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
+  }
+
+  release(): void {
+    this.#used = Math.max(0, this.#used - 1);
+    this.drain();
+  }
+
+  /** Hand free slots to waiters (also call after the capacity grows). */
+  drain(): void {
+    while (this.#waiters.length && this.#used < this.capacity()) {
+      this.#used++;
+      this.#waiters.shift()!();
     }
   }
 }
@@ -195,22 +214,68 @@ interface ActiveRun {
   browser?: BrowserContext;
   /** console + network of the run's browser, while it's open */
   browserLog?: ReturnType<typeof recordBrowser>;
+  /** holds one of the browser slots (false while parked waiting for a person) */
+  hasSlot?: boolean;
 }
 
 export class Runner {
   readonly #active = new Map<string, ActiveRun>();
   /** live browser views for runs waiting on a person */
   readonly remote = new RemoteHub();
-  readonly #browsers: Semaphore;
+  /**
+   * Runs with a browser doing work. Size: the "Browsers at once" setting
+   * (or `maxConcurrent` when given, for tests).
+   */
+  readonly #browsers: Slots;
+  /**
+   * Runs waiting for a person (code, robot check) hand their slot to the
+   * next run while they wait, up to this many (same size); beyond that they
+   * keep their slot.
+   */
+  readonly #parked: Slots;
+  /** One run per bank at a time, so a bank never sees two logins at once. */
+  readonly #banks = new Map<string, Slots>();
 
   constructor(
     private readonly store: ConfigStore,
     private readonly runs: RunStore,
     readonly mfa: MfaBroker,
     private readonly dataDir: string,
-    maxConcurrent = 2,
+    maxConcurrent?: number,
   ) {
-    this.#browsers = new Semaphore(maxConcurrent);
+    const size = () => maxConcurrent ?? this.store.settings().maxBrowsers;
+    this.#browsers = new Slots(size);
+    this.#parked = new Slots(size);
+  }
+
+  /** Call after "Browsers at once" changes, so queued runs can start straight away. */
+  capacityChanged(): void {
+    this.#browsers.drain();
+    this.#parked.drain();
+  }
+
+  #bankLock(provider: string): Slots {
+    let lock = this.#banks.get(provider);
+    if (!lock) this.#banks.set(provider, (lock = new Slots(() => 1)));
+    return lock;
+  }
+
+  /**
+   * While a run waits for a person, give its browser slot to the next run
+   * (if fewer than the limit are already parked). Returns a function that
+   * takes a slot back afterwards, waiting in line if needed.
+   */
+  async #park(active: ActiveRun, rlog: (m: string) => void): Promise<() => Promise<void>> {
+    if (!active.hasSlot || !this.#parked.available) return async () => {};
+    await this.#parked.acquire();
+    active.hasSlot = false;
+    this.#browsers.release();
+    return async () => {
+      this.#parked.release();
+      if (!this.#browsers.available) rlog("waiting for a browser slot to carry on");
+      await this.#browsers.acquire(active.abort.signal);
+      active.hasSlot = true;
+    };
   }
 
   /** Is any run in progress? */
@@ -307,11 +372,24 @@ export class Runner {
       else if (flags.debug) rlog("DEBUG RUN: visible browser, network capture and downloads kept; nothing written to Sure");
       if (discover) rlog("DISCOVER: listing accounts only, no transactions fetched");
       else if (dryRun) rlog("DRY RUN: nothing will be written to Sure");
-      rlog(`waiting for browser slot (${conn.provider}, ${range.since} → ${range.until})`);
-      const txns = await this.#browsers.use(
-        () => this.#scrape(runId, conn, settings, creds, debugDir, range, rlog, flags, active),
-        signal,
-      );
+      rlog(`${conn.provider}, ${range.since} → ${range.until}`);
+      const bank = this.#bankLock(conn.provider);
+      if (!bank.available) rlog(`waiting for another ${def.label} run to finish (one per bank at a time)`);
+      await bank.acquire(signal);
+      let txns: BankTransaction[];
+      try {
+        if (!this.#browsers.available) rlog("waiting for a browser slot (Settings → Browsers at once)");
+        await this.#browsers.acquire(signal);
+        active.hasSlot = true;
+        try {
+          txns = await this.#scrape(runId, conn, settings, creds, debugDir, range, rlog, flags, active);
+        } finally {
+          if (active.hasSlot) this.#browsers.release();
+          active.hasSlot = false;
+        }
+      } finally {
+        bank.release();
+      }
       signal.throwIfAborted();
       if (flags.train) {
         this.runs.finish(runId, "success", stats);
@@ -416,15 +494,18 @@ export class Runner {
       requestMfa: async (prompt) => {
         rlog(`waiting for MFA code: ${prompt}`);
         this.runs.setStatus(runId, "awaiting_mfa");
+        const resume = await this.#park(active, rlog);
         try {
           return await this.mfa.request(conn.id, runId, prompt, settings.mfaTimeoutSeconds * 1000);
         } finally {
           this.runs.setStatus(runId, "running");
+          await resume();
         }
       },
       requestBrowserHelp: async (page, prompt, until, opts) => {
         rlog(`waiting for you in the browser view: ${prompt}`);
         this.runs.setStatus(runId, "awaiting_mfa");
+        const resume = await this.#park(active, rlog);
         await this.remote.open(conn.id, page, prompt, opts?.doneLabel);
         const answered = this.mfa.request(conn.id, runId, prompt, opts?.timeoutMs ?? settings.mfaTimeoutSeconds * 1000, "browser");
         let waiting = true;
@@ -446,6 +527,7 @@ export class Runner {
           await watch;
           await this.remote.close(conn.id);
           this.runs.setStatus(runId, "running");
+          await resume();
         }
       },
     };

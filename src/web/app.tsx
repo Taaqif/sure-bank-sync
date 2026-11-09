@@ -457,6 +457,7 @@ export function createApp(svc: Services) {
       schedule: str(b, "schedule"),
       skipPending: b.skipPending === "on",
       mfaTimeoutSeconds: str(b, "mfaTimeoutSeconds"),
+      maxBrowsers: str(b, "maxBrowsers"),
       dryRun: b.dryRun === "on",
       saveNetworkLog: b.saveNetworkLog === "on",
       verboseLogs: b.verboseLogs === "on",
@@ -465,10 +466,16 @@ export function createApp(svc: Services) {
       store.saveSettings(input);
     } catch (e) {
       if (!(e instanceof ValidationError)) throw e;
-      const shown = { ...store.settings(), ...input, mfaTimeoutSeconds: Number(input.mfaTimeoutSeconds) };
+      const shown = {
+        ...store.settings(),
+        ...input,
+        mfaTimeoutSeconds: Number(input.mfaTimeoutSeconds),
+        maxBrowsers: Number(input.maxBrowsers),
+      };
       return page(c, <SettingsPage s={shown} storage={await storage()} error={e.message} />, 400);
     }
     svc.scheduler.reload();
+    svc.runner.capacityChanged();
     return redirect(c, "/settings", "Settings saved");
   });
 

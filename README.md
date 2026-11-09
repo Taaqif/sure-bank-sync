@@ -45,6 +45,10 @@ flowchart LR
   unless **Verbose logs** is on.
 - **Run pages** show the live log, and screenshots and page HTML when a run
   fails. Runs can be cancelled at any time.
+- **Runs queue politely**: scheduled runs start up to 2 minutes apart, each
+  bank runs one connection at a time, and at most **Browsers at once**
+  (Settings, default 2) work together. A run waiting for you hands its place
+  to the next one.
 
 ## Quick start
 

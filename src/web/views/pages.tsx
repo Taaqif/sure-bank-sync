@@ -291,7 +291,22 @@ export const SettingsPage = (p: { s: Settings; storage?: StorageInfo; msg?: stri
         <label>
           MFA timeout (seconds)
           <input type="number" name="mfaTimeoutSeconds" value={String(p.s.mfaTimeoutSeconds)} min="30" max="3600" required />
-          <small>How long a run waits for a code to be typed in on the dashboard.</small>
+          <small>How long a run waits for a code, robot check or other step from you.</small>
+        </label>
+        <label>
+          Browsers at once
+          <select name="maxBrowsers">
+            {[1, 2, 3, 4].map((n) => (
+              <option value={String(n)} selected={p.s.maxBrowsers === n}>
+                {n}
+              </option>
+            ))}
+          </select>
+          <small>
+            How many runs can use a browser at the same time; others queue. Each bank still runs one connection at a
+            time. Runs waiting for you hand their place to the next run (up to the same number again). Each browser
+            uses roughly 300-500 MB of memory.
+          </small>
         </label>
         <label class="check">
           <input type="checkbox" name="skipPending" checked={p.s.skipPending} /> Skip pending transactions
