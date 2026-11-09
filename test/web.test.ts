@@ -290,7 +290,7 @@ describe("web", () => {
     const id = env.runs.start("alice-anz", "alice", "manual");
     env.runs.appendLog(id, "10:00:00 one");
     const first = (await (await get(app, `/api/runs/${id}?from=0`)).json()) as any;
-    expect(first).toMatchObject({ status: "running", finished: false, log: "10:00:00 one\n" });
+    expect(first).toMatchObject({ status: "queued", finished: false, log: "10:00:00 one\n" });
     expect(await (await get(app, `/runs/${id}`)).text()).toContain(`class="live"`);
     env.runs.appendLog(id, "10:00:01 two");
     const next = (await (await get(app, `/api/runs/${id}?from=${first.logLength}`)).json()) as any;

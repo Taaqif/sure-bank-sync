@@ -27,14 +27,14 @@ export class RunStore {
     // Runs left open by a crash/restart can never finish.
     db.update(runs)
       .set({ status: "failed", error: "interrupted (process restarted)", finishedAt: nowIso() })
-      .where(inArray(runs.status, ["running", "awaiting_mfa"]))
+      .where(inArray(runs.status, ["queued", "running", "awaiting_mfa"]))
       .run();
   }
 
   start(connectionId: string, userName: string, trigger: Run["trigger"], dryRun = false): number {
     return this.db
       .insert(runs)
-      .values({ connectionId, userName, trigger, dryRun, status: "running", startedAt: nowIso() })
+      .values({ connectionId, userName, trigger, dryRun, status: "queued", startedAt: nowIso() })
       .returning({ id: runs.id })
       .get().id;
   }
@@ -73,10 +73,10 @@ export class RunStore {
 
   /** Delete finished runs started more than `days` ago (0: all finished runs). Returns how many. */
   deleteFinishedOlderThan(days: number, now = Date.now()): number {
-    if (days <= 0) return this.db.run(sql`DELETE FROM runs WHERE status NOT IN ('running', 'awaiting_mfa')`).changes;
+    if (days <= 0) return this.db.run(sql`DELETE FROM runs WHERE status NOT IN ('queued', 'running', 'awaiting_mfa')`).changes;
     const cutoff = new Date(now - days * 86_400_000).toISOString().replace(/\.\d{3}Z$/, "Z");
     const res = this.db.run(
-      sql`DELETE FROM runs WHERE status NOT IN ('running', 'awaiting_mfa') AND started_at < ${cutoff}`,
+      sql`DELETE FROM runs WHERE status NOT IN ('queued', 'running', 'awaiting_mfa') AND started_at < ${cutoff}`,
     );
     return res.changes;
   }

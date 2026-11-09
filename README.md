@@ -49,8 +49,10 @@ flowchart LR
   fails. Runs can be cancelled at any time.
 - **Runs queue politely**: scheduled runs start up to 2 minutes apart, each
   bank runs one connection at a time, and at most **Browsers at once**
-  (Settings, default 2) work together. A run waiting for you hands its place
-  to the next one.
+  (Settings, default 2) work together. This covers every kind of run (sync,
+  dry run, discover). Waiting runs show as **queued**; a run waiting for you
+  hands its place to the next one. On a small server, set Browsers at once
+  to 1.
 
 ## Quick start
 

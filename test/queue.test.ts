@@ -129,7 +129,16 @@ describe("runner queueing", () => {
     events.length = 0;
     const e = env([{ provider: "bank-a" }, { provider: "bank-b" }]);
     const runner = new Runner(e.store, e.runs, new MfaBroker(), e.dir, 1);
-    await Promise.all(e.ids.map((id) => runner.run(id, "manual", { dryRun: true })));
+    const all = Promise.all(e.ids.map((id) => runner.run(id, "manual", { dryRun: true })));
+    // the waiting run shows as queued, the other as running
+    let statuses: string[] = [];
+    for (let i = 0; i < 200; i++) {
+      statuses = e.runs.recent(undefined, 5).map((r) => r.status).sort();
+      if (statuses.join() === "queued,running") break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(statuses).toEqual(["queued", "running"]);
+    await all;
     // with one browser, the second run starts only after the first ends
     expect(events[1]).toMatch(/^end /);
     const logs = e.runs.recent(undefined, 5).map((r) => r.log).join("\n");

@@ -52,7 +52,8 @@ export const bankAccounts = sqliteTable(
 
 // --- run history / sync state ------------------------------------------
 
-export type RunStatus = "running" | "awaiting_mfa" | "success" | "failed" | "cancelled";
+/** queued: waiting for its bank or a browser slot */
+export type RunStatus = "queued" | "running" | "awaiting_mfa" | "success" | "failed" | "cancelled";
 
 export const runs = sqliteTable(
   "runs",

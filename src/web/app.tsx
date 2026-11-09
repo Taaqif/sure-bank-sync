@@ -878,7 +878,7 @@ export function createApp(svc: Services) {
     const needs = svc.mfa.get(run.connectionId);
     return c.json({
       status: run.status,
-      finished: run.status !== "running" && run.status !== "awaiting_mfa",
+      finished: !["queued", "running", "awaiting_mfa"].includes(run.status),
       log: run.log.slice(from),
       logLength: run.log.length,
       stats: runStats(run),

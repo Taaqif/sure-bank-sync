@@ -62,7 +62,7 @@ function StatusCell({ r }: { r: ConnectionRow }) {
   if (r.running) {
     return (
       <a href={r.last ? `/runs/${r.last.id}` : "#"}>
-        <Badge status="running" label="running…" />
+        {r.last?.status === "queued" ? <Badge status="queued" label="queued…" /> : <Badge status="running" label="running…" />}
       </a>
     );
   }
@@ -218,7 +218,7 @@ function diff(now) {
   for (const [conn, r] of now) {
     const before = prev.get(conn);
     if (!before) continue;
-    if (r.state === "idle" && r.run && (before.state !== "idle" || before.run !== r.run) && r.status !== "running") toast(conn, r);
+    if (r.state === "idle" && r.run && (before.state !== "idle" || before.run !== r.run) && r.status !== "running" && r.status !== "queued") toast(conn, r);
     if (r.state === "needs_you" && before.state !== "needs_you") document.getElementById("needs-you")?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
   prev = now;
@@ -1030,7 +1030,7 @@ export const runStats = (run: Run) =>
   `fetched ${run.fetched} · ${run.dryRun ? "would create" : "new"} ${run.created} · already synced ${run.skipped} · unmapped ${run.unmapped}`;
 
 export const RunPage = (p: { run: Run; shots: string[]; logs?: string[]; recordings?: Recording[]; msg?: string }) => {
-  const live = p.run.status === "running" || p.run.status === "awaiting_mfa";
+  const live = p.run.status === "queued" || p.run.status === "running" || p.run.status === "awaiting_mfa";
   return (
   <Layout title={`Run ${p.run.id}`} nav="dashboard" msg={p.msg} script={live ? RUN_LIVE_JS : undefined}>
     <div id="run" data-id={String(p.run.id)} data-conn={p.run.connectionId} data-log-length={String(p.run.log.length)} />

@@ -381,6 +381,7 @@ export class Runner {
         if (!this.#browsers.available) rlog("waiting for a browser slot (Settings → Browsers at once)");
         await this.#browsers.acquire(signal);
         active.hasSlot = true;
+        this.runs.setStatus(runId, "running");
         try {
           txns = await this.#scrape(runId, conn, settings, creds, debugDir, range, rlog, flags, active);
         } finally {

@@ -58,7 +58,7 @@ a { color: var(--run); }
 .muted { color: var(--muted); }
 .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid currentColor; }
 .success { color: var(--ok); } .failed { color: var(--bad); }
-.running { color: var(--run); } .awaiting_mfa { color: var(--warn); } .disabled, .cancelled { color: var(--muted); }
+.running { color: var(--run); } .queued { color: var(--muted); } .awaiting_mfa { color: var(--warn); } .disabled, .cancelled { color: var(--muted); }
 button { font: inherit; padding: 5px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--accent); color: var(--bg); cursor: pointer; }
 button:disabled { opacity: .4; cursor: default; }
 button.secondary { background: transparent; color: var(--fg); }
