@@ -107,7 +107,7 @@ export function DashboardStatus(p: DashboardProps) {
       <div class="row between">
         <h2>
           Connections
-          <LiveBadge title="Updating live" />
+          {p.rows.some((r) => r.running || r.mfa) && <LiveBadge title="A run is in progress; this page updates live" />}
         </h2>
         {p.hasUsers && (
           <a href="/connections/new">
@@ -172,7 +172,6 @@ export function DashboardStatus(p: DashboardProps) {
 
       <h2 id="recent-runs">
         Recent runs
-        <LiveBadge />
       </h2>
       <RunsTable {...p.runs} href={(n) => (n > 1 ? `/?runs=${n}#recent-runs` : "/#recent-runs")} />
     </>
@@ -691,7 +690,7 @@ export const ConnActions = (p: { conn: Connection; provider?: ProviderDefinition
     <div id="conn-actions" class="row between" data-running={p.running ? "1" : undefined}>
       <h2>
         {p.conn.userName} · {p.conn.id} <span class="muted">({p.provider?.label ?? p.conn.provider})</span>
-        <LiveBadge title="Updating live" />
+        {p.running && <LiveBadge title="A run is in progress; this page updates live" />}
       </h2>
       <div class="row">
         <form method="post" action={`/connections/${p.conn.id}/run`} class="row">
@@ -719,7 +718,6 @@ export const ConnRuns = (p: { conn: Connection; runs: RunsPage }) => (
   <div id="conn-runs">
     <h2 id="runs">
       Runs
-      <LiveBadge title="Updating live" />
     </h2>
     <RunsTable {...p.runs} href={(n) => `/connections/${encodeURIComponent(p.conn.id)}${n > 1 ? `?runs=${n}` : ""}#runs`} />
   </div>
