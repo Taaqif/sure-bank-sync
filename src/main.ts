@@ -12,6 +12,7 @@ import { Scheduler } from "./scheduler.js";
 import { ConfigStore } from "./store.js";
 import { createApp } from "./web/app.js";
 import { AuthConfigError, authFromEnv, authWarnings, type AuthConfig } from "./web/auth.js";
+import { VERSION } from "./version.js";
 
 const log = logger("main");
 
@@ -103,7 +104,7 @@ async function main() {
   });
   const port = Number(args.port);
   const server = serve({ fetch: app.fetch, hostname: args.host, port }, () => {
-    log.info(`listening on http://${args.host}:${port}`);
+    log.info(`sure-bank-sync ${VERSION} listening on http://${args.host}:${port}`);
   });
 
   const shutdown = () => {

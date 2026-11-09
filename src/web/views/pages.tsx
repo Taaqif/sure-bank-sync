@@ -5,7 +5,7 @@ import type { ProviderDefinition } from "../../providers/index.js";
 import type { Connection, Settings, User } from "../../store.js";
 import type { SureAccount } from "../../sureClient.js";
 import { useContext } from "hono/jsx";
-import { BareLayout, Layout, NeedsBrowser, UiContext } from "./layout.js";
+import { BareLayout, Layout, NeedsBrowser, UiContext, Version } from "./layout.js";
 import { RECIPE_SUGGESTIONS, type RecordedStep, type Recording } from "../../recorder.js";
 import { Badge, CredentialInputs, RunsTable, ago, formatWhen } from "./parts.js";
 import { LookbackField, SCHEDULE_JS, ScheduleField } from "./schedule.js";
@@ -1204,6 +1204,7 @@ export const LoginPage = (p: {
           <button type="submit">Sign in</button>
         </form>
         )}
+        <Version />
       </div>
     </div>
   </BareLayout>

@@ -1,5 +1,17 @@
 import { createContext, useContext, type Child } from "hono/jsx";
 import { raw } from "hono/html";
+import { VERSION } from "../../version.js";
+
+/** Small version label, linking to its release notes. */
+export function Version() {
+  return /^\d+\.\d+\.\d+$/.test(VERSION) ? (
+    <a class="version" href={`https://github.com/Taaqif/sure-bank-sync/releases/tag/v${VERSION}`} target="_blank" rel="noopener">
+      v{VERSION}
+    </a>
+  ) : (
+    <span class="version">{VERSION}</span>
+  );
+}
 
 /** Request-wide UI state every page can read (set in app.tsx). */
 export const UiContext = createContext({
@@ -28,7 +40,11 @@ body { margin: 0; font: 14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif
 header { padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--card); }
 header a { color: var(--fg); text-decoration: none; font-weight: 600; }
 nav { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
-nav a.brand { margin-right: 12px; }
+nav a.brand { margin-right: 4px; }
+.version { color: var(--muted); font-size: 11px; font-weight: 400; text-decoration: none; }
+a.version:hover { text-decoration: underline; }
+nav .version { margin-right: 12px; }
+.login .version { display: block; margin-top: 18px; text-align: center; }
 nav a.tab { font-weight: 500; color: var(--muted); }
 nav a.tab.on { color: var(--fg); }
 main { max-width: 1100px; margin: 0 auto; padding: 20px 16px; }
@@ -278,6 +294,7 @@ export function Layout(props: {
               <a class="brand" href="/">
                 Bank Sync → Sure
               </a>
+              <Version />
               {tab("dashboard", "/", "Dashboard")}
               {tab("household", "/users", "Household")}
               {tab("logs", "/logs", "Logs")}

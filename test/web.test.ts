@@ -1,4 +1,4 @@
-import { mkdirSync, existsSync, writeFileSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
@@ -218,6 +218,15 @@ describe("web", () => {
     expect(runner.remote.get(id)).toBeUndefined();
     expect((await input({ type: "key", key: "a" })).status).toBe(404);
   }, 60_000);
+
+  it("shows the version in the nav and on the login page", async () => {
+    const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+    const env = setup();
+    const { app } = makeApp(env, { password: "pw" });
+    expect(await (await get(app, "/login")).text()).toContain(`v${version}`);
+    const open = makeApp(setup()).app;
+    expect(await (await get(open, "/")).text()).toContain(`releases/tag/v${version}`);
+  });
 
   it("starts the login again when Retry is pressed in the browser view", async () => {
     const env = setup();
