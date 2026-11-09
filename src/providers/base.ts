@@ -87,12 +87,21 @@ export async function settle(page: Page, opts: { maxMs?: number; quietMs?: numbe
 export async function snapshot(ctx: ProviderContext, name: string): Promise<void> {
   await mkdir(ctx.debugDir, { recursive: true });
   for (const [i, page] of ctx.browser.pages().entries()) {
+    // HTML first: it's cheap and still works when a busy page can't be screenshotted.
     try {
-      // Full-page capture briefly resizes the page; skip it when a person is using the window.
-      await page.screenshot({ path: join(ctx.debugDir, `${name}-${i}.png`), fullPage: !ctx.debug });
       await writeFile(join(ctx.debugDir, `${name}-${i}.html`), await page.content());
     } catch (e) {
-      ctx.log(`snapshot ${name} failed: ${(e as Error).message}`);
+      ctx.log(`snapshot ${name}: couldn't save the page: ${(e as Error).message.split("\n")[0]}`);
+    }
+    try {
+      // Full-page capture briefly resizes the page; skip it when a person is using the window.
+      await page.screenshot({ path: join(ctx.debugDir, `${name}-${i}.png`), fullPage: !ctx.debug, timeout: 10_000 });
+    } catch {
+      try {
+        await page.screenshot({ path: join(ctx.debugDir, `${name}-${i}.png`), timeout: 5_000 });
+      } catch (e) {
+        ctx.log(`snapshot ${name}: no screenshot: ${(e as Error).message.split("\n")[0]}`);
+      }
     }
   }
 }

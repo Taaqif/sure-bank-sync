@@ -56,6 +56,8 @@ const ERROR_TEXT = /(incorrect|invalid|doesn'?t match).*(user ?id|password)|(use
 /** how an identity-check option for sending a code tends to read */
 const SEND_CHOICE = /sms|text|e-?mail|call|phone|mobile|send|\*{2,}|•{2,}/i;
 
+const UNAVAILABLE_TEXT = /information is unavailable at this time/i;
+const UNAVAILABLE_RETRIES = 3;
 const visible = (l: Locator) => l.first().isVisible().catch(() => false);
 
 /** "03/10/2026", "3 Oct 2026", "03 Oct. 2026", "2026-10-03" -> "2026-10-03" */
@@ -406,10 +408,27 @@ export const amex: ProviderDefinition = {
         if (periodStart) ctx.log(`amex: current statement period starts ${periodStart}`);
 
         const download = page.getByRole("button", { name: /^\s*download\s*$/i }).or(page.getByRole("link", { name: /^\s*download\s*$/i })).first();
-        await download.waitFor({ timeout: 30_000 }).catch(async () => {
-          await snapshot(ctx, "no-download-button");
-          throw new ProviderError("Amex: no Download button on Recent Transactions");
-        });
+        // Amex sometimes shows "We're sorry. Your information is unavailable at this time."
+        // instead of the transactions; it usually clears after a reload.
+        const unavailable = page.getByText(UNAVAILABLE_TEXT).first();
+        for (let attempt = 1; ; attempt++) {
+          await download.or(unavailable).first().waitFor({ timeout: 30_000 }).catch(() => {});
+          if (await visible(download)) break;
+          if (!(await visible(unavailable))) {
+            await snapshot(ctx, "no-download-button");
+            throw new ProviderError("Amex: no Download button on Recent Transactions");
+          }
+          if (attempt > UNAVAILABLE_RETRIES) {
+            await snapshot(ctx, "amex-unavailable");
+            throw new ProviderError(
+              "Amex says \"Your information is unavailable at this time\" (a problem on Amex's side; the next run usually works)",
+            );
+          }
+          ctx.log(`amex: Amex says the information is unavailable; reloading (${attempt} of ${UNAVAILABLE_RETRIES})`);
+          await pause(5000, 10_000);
+          await page.reload({ waitUntil: "domcontentloaded" });
+          await settle(page);
+        }
         await download.click();
 
         // "Select Download File Type" modal: Excel is preselected, switch to CSV.
