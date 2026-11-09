@@ -1,5 +1,5 @@
 /** Runs one sync for one connection: scrape -> map -> dedupe -> push to Sure. */
-import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { chromium, type BrowserContext, type Page } from "playwright";
 import { logger } from "./log.js";
@@ -441,6 +441,14 @@ export class Runner {
   ): Promise<BankTransaction[]> {
     const { discover, debug } = flags;
     const profile = join(this.dataDir, "browser", conn.id);
+    // Banks remember a trusted device through this profile's cookies. A new
+    // one every run means the data folder isn't kept between runs/containers.
+    const saved = await stat(join(profile, "Default")).catch(() => null);
+    rlog(
+      saved
+        ? "using the saved browser from earlier runs (banks should recognise this device)"
+        : "new saved browser: the bank sees a new device and may ask to approve this login",
+    );
     await mkdir(profile, { recursive: true });
     // Debug runs: a window on your screen. Other runs: a window on a virtual
     // screen (Xvfb), because some banks block windowless Chrome. Headless only
