@@ -22,7 +22,9 @@ export type RemoteInput =
   | { type: "click"; x: number; y: number }
   | { type: "move" | "down" | "up"; x: number; y: number }
   | { type: "wheel"; x: number; y: number; dx: number; dy: number }
-  | { type: "key"; key: string };
+  | { type: "key"; key: string }
+  /** pasted text */
+  | { type: "text"; text: string };
 
 /** Named keys the UI may send; single characters are typed as text. */
 const KEYS = new Set([
@@ -85,6 +87,11 @@ export class RemoteSession {
         case "wheel":
           await m.move(i.x, i.y);
           await m.wheel(i.dx, i.dy);
+          break;
+        case "text":
+          // Typed key by key so sites that listen for key events see it; long text is inserted at once.
+          if (i.text.length <= 200) await this.page.keyboard.type(i.text);
+          else await this.page.keyboard.insertText(i.text);
           break;
         case "key":
           if (i.key.length === 1) await this.page.keyboard.type(i.key);

@@ -1132,6 +1132,27 @@ const REMOTE_JS = `
     e.preventDefault();
     send({ type: "key", key: e.key === " " ? "Space" : e.key });
   });
+  // Paste: Ctrl/Cmd+V on the picture or in the Keyboard box, or the Paste button.
+  const pasteText = (text) => {
+    text = (text || "").replace(/\r\n?/g, "\n");
+    if (!text) return;
+    if (text.length > 2000) { status.textContent = "That's too long to paste (2000 characters max)."; return; }
+    send({ type: "text", text });
+    status.textContent = "Pasted " + text.length + " character" + (text.length === 1 ? "" : "s") + ".";
+  };
+  document.addEventListener("paste", (e) => {
+    if (e.target !== img && e.target !== keys) return;
+    e.preventDefault();
+    pasteText(e.clipboardData && e.clipboardData.getData("text/plain"));
+    if (e.target === keys) keys.value = "";
+  });
+  document.getElementById("rpaste").addEventListener("click", async () => {
+    try {
+      pasteText(await navigator.clipboard.readText());
+    } catch {
+      status.textContent = "The browser blocked reading the clipboard here. Click the picture and press Ctrl+V (Cmd+V on a Mac), or tap Keyboard and paste.";
+    }
+  });
   window.refreshLive = () => {};
 })();`;
 
@@ -1171,7 +1192,10 @@ export const RemotePage = (p: { connectionId: string; prompt?: string; doneLabel
           <button type="button" id="rkeyboard" class="secondary">
             Keyboard
           </button>
-          <small class="muted">Tap to click, drag to scroll. On a computer, click the picture and type.</small>
+          <button type="button" id="rpaste" class="secondary" title="Type the clipboard's text into the bank page">
+            Paste
+          </button>
+          <small class="muted">Tap to click, drag to scroll. On a computer, click the picture and type or press Ctrl+V to paste.</small>
           <input id="rkeys" class="rkeys" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck={false} aria-label="Type into the bank page" />
         </div>
         <img id="screen" class="screen" tabindex={0} draggable={false} alt="Live view of the bank's page" />

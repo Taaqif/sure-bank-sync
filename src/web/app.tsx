@@ -613,6 +613,8 @@ export function createApp(svc: Services) {
         await session.input({ type: "wheel", x: num(b.x), y: num(b.y), dx: num(b.dx), dy: num(b.dy) });
       } else if (b?.type === "key" && typeof b.key === "string" && b.key.length <= 20) {
         await session.input({ type: "key", key: b.key });
+      } else if (b?.type === "text" && typeof b.text === "string" && b.text.length > 0 && b.text.length <= 2000) {
+        await session.input({ type: "text", text: b.text });
       } else return c.json({ error: "bad_input" }, 400);
     } catch (e) {
       return c.json({ error: (e as Error).message.split("\n")[0] }, 409);
