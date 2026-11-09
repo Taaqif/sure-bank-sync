@@ -14,65 +14,49 @@ Drizzle, croner.
 
 ## How it works
 
-```
-cron (per connection) → Playwright logs into bank → fetch transactions
-  → record bank accounts seen → map to Sure accounts (set in UI)
-  → skip pending / already synced
-  → one CSV import per Sure account: POST /api/v1/imports (publish=true)
-  → poll the import until Sure reports complete, then mark rows synced
+```mermaid
+flowchart LR
+  T["Schedule<br/>or Run now"] --> R["Runner"]
+  R --> C["Chromium<br/>(own profile per connection)"]
+  C <--> BK["Bank website"]
+  BK -. "CAPTCHA / robot check / code" .-> Y["You<br/>browser view or code box"]
+  Y -. "solved" .-> BK
+  C -- "CSV download" --> P["Parse and map<br/>to Sure accounts"]
+  P --> D{"Already<br/>synced?"}
+  D -- "yes" --> X["Skip"]
+  D -- "new" --> I["One CSV import per account<br/>POST /api/v1/imports"]
+  I --> S[("Sure")]
+  S -- "import complete" --> DB[("Synced record<br/>(SQLite)")]
 ```
 
-- **Config lives in the database**, edited in the UI: Sure URL and defaults,
-  household members (each with their Sure API key), bank connections.
-- **Secrets are encrypted** (AES-256-GCM) with `SURE_SYNC_SECRET_KEY` and are
-  write-only in the UI: never displayed back.
-- **Account mapping**: after a connection's first run, the bank accounts it
-  found are listed with a dropdown of your Sure accounts. Unmapped accounts are
-  skipped (not lost): map them and run again.
-- **Imports, not single transactions**: rows go to Sure through its CSV import
-  API, so they show up under Imports in Sure and can be reverted there as a batch.
-- **Dedupe**: a local record of what Sure confirmed, plus Sure's import
-  matching (date + amount + currency + name updates an existing entry instead
-  of duplicating), so re-runs and overlapping lookback windows are safe.
-- **Dry run / Discover accounts**: dry runs log every row they would import
-  and write nothing; Discover accounts only lists accounts for mapping.
-- **Schedule** is set in the UI: pick hourly / every few hours / daily /
-  weekdays / weekly (or type a cron) with a preview of the next runs. Default
-  in Settings, optional per-connection override.
-- **Sync period** (days of history per run) is per bank: each bank offers the
-  choices that fit its export (ANZ: 7-120 days) and a default, and each
-  connection can pick one. Amex has no sync period: it always takes the
-  current statement period.
-- **MFA**: when a bank asks for a code the run pauses and the dashboard shows
-  an input box.
-- **CAPTCHAs and other "prove you're human" steps**: the run pauses and the
-  dashboard shows **Open browser**: a live view of the run's (headless)
-  browser where you click and type to solve it. The run carries on by itself
-  once the check is gone, or when you press Done. Nothing is solved
-  automatically. Try it with the demo bank and options `{"captcha": true}`.
-- **Cancel**: any run in progress can be stopped from the dashboard,
-  connection or run page.
-- **Remembered device**: each connection keeps its own browser profile in
-  `/data/browser/<id>`, so banks ask for MFA less often.
-  Settings → **Clear all browser data** deletes them all (every connection is
-  logged out; expect identity checks on the next login).
-- **Private by default**: logs show counts and only the last 4 digits of
-  account numbers. Settings → **Verbose logs** adds every transaction and full
-  account numbers, for troubleshooting.
-- **Debugging**: failed runs save a screenshot + HTML of the page, viewable
-  from the run page.
+- **Web UI for everything**: household members (each with a Sure API key),
+  bank connections, account mapping, schedules and sync periods.
+- **Secrets encrypted** with `SURE_SYNC_SECRET_KEY` and never shown again.
+- **Map once**: the first run (or **Discover accounts**) lists the bank's
+  accounts; pick the Sure account for each. Unmapped accounts are skipped.
+- **No duplicates**: a local record of what Sure confirmed, plus Sure's own
+  import matching, makes re-runs and overlapping periods safe. Imports can be
+  reverted in Sure as a batch.
+- **A person for the hard parts**: codes go in a box on the dashboard;
+  CAPTCHAs and robot checks open a live browser view. Nothing is solved
+  automatically.
+- **Safe to try**: **Dry run** logs what would be sent and writes nothing.
+  Logs hide transactions and show only the last 4 digits of account numbers
+  unless **Verbose logs** is on.
+- **Run pages** show the live log, and screenshots and page HTML when a run
+  fails. Runs can be cancelled at any time.
 
 ## Setup
 
 ```bash
 cp .env.example .env
 docker compose run --rm sure-bank-sync --generate-key   # paste into SURE_SYNC_SECRET_KEY
-# set SURE_SYNC_ADMIN_PASSWORD too
+# choose a login: SURE_SYNC_ADMIN_PASSWORD, or OIDC (see Configuration)
 chmod 600 .env
 docker compose up -d --build
 ```
 
-Open http://localhost:8686 (log in as `admin`) and follow the setup steps:
+Open http://localhost:8686 (sign in as `admin`, or with your OIDC provider) and follow the setup steps:
 
 1. **Settings** → Sure URL (as seen from the container, e.g.
    `http://host.docker.internal:3000` if Sure runs on the host, or its
@@ -84,6 +68,60 @@ Open http://localhost:8686 (log in as `admin`) and follow the setup steps:
 
 **Back up `SURE_SYNC_SECRET_KEY`.** Without it the saved logins in `/data`
 can't be decrypted and must be re-entered.
+
+## Configuration
+
+All set with environment variables in `.env`. Only `SURE_SYNC_SECRET_KEY` is
+required; everything else (Sure URL, household, banks, schedules) is set in
+the web UI.
+
+| Variable | Default | What |
+|---|---|---|
+| `SURE_SYNC_SECRET_KEY` | (required) | Encrypts saved logins and API keys. Generate with `--generate-key`; back it up. |
+| **Login** | | |
+| `SURE_SYNC_AUTH` | see below | `password`, `oidc` or `none`. Unset: `password` if a password is set, else `oidc` if an issuer is set, else `none`. |
+| `SURE_SYNC_ADMIN_USER` | `admin` | Password mode user name. |
+| `SURE_SYNC_ADMIN_PASSWORD` | | Password mode password. |
+| `SURE_SYNC_OIDC_ISSUER` | | Provider's issuer URL, e.g. `https://id.example.com` (Pocket ID). |
+| `SURE_SYNC_OIDC_CLIENT_ID` | | Client ID from the provider. |
+| `SURE_SYNC_OIDC_CLIENT_SECRET` | | Client secret; leave empty for a public (PKCE) client. |
+| `SURE_SYNC_OIDC_NAME` | `single sign-on` | Sign-in button text, e.g. `Pocket ID`. |
+| `SURE_SYNC_OIDC_ALLOWED_EMAILS` | anyone | Comma-separated verified emails allowed in. |
+| `SURE_SYNC_OIDC_ALLOWED_GROUPS` | anyone | Comma-separated groups allowed in (either list matching is enough). |
+| `SURE_SYNC_OIDC_GROUPS_CLAIM` | `groups` | Claim that lists the user's groups. |
+| `SURE_SYNC_OIDC_SCOPES` | `openid email profile` | Scopes to request (`groups` is added when groups are required). |
+| **Reverse proxy** | | |
+| `SURE_SYNC_PUBLIC_URL` | from request | External URL, e.g. `https://sync.example.com`. Needed for OIDC behind a proxy. |
+| `SURE_SYNC_TRUST_PROXY` | off | `1` to trust `X-Forwarded-*` headers. Only when the proxy is the only way in. |
+| **Server** | | |
+| `HOST_PORT` | `8686` | Port on the host (docker compose). |
+| `SURE_SYNC_PORT` | `8686` | Port inside the container. |
+| `SURE_SYNC_HOST` | `0.0.0.0` | Listen address. |
+| `SURE_SYNC_DATA_DIR` | `/data` | Database, browser profiles, logs and debug files. |
+| `SURE_SYNC_LOG_MAX_BYTES` | `5000000` | App log size before it rotates (one old file kept). |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`. |
+| `TZ` | `Australia/Melbourne` | Container time zone (schedules use the one in Settings). |
+| **Development** | | |
+| `SURE_SYNC_DEBUG` | off | `1` adds Debug run and Train. |
+| `SURE_SYNC_HEADLESS` | off | `1` runs Chromium headless instead of on the virtual screen. |
+| `SURE_SYNC_SLOWMO` | `150` | Milliseconds between browser actions in debug runs. |
+| `SURE_SYNC_PAUSE_ON_ERROR` | off | `1` opens the Playwright Inspector when a debug run fails. |
+
+Pocket ID example:
+
+```bash
+SURE_SYNC_AUTH=oidc
+SURE_SYNC_PUBLIC_URL=https://sync.example.com
+SURE_SYNC_OIDC_ISSUER=https://id.example.com
+SURE_SYNC_OIDC_CLIENT_ID=<client id>
+SURE_SYNC_OIDC_CLIENT_SECRET=<client secret>
+SURE_SYNC_OIDC_NAME=Pocket ID
+SURE_SYNC_OIDC_ALLOWED_EMAILS=alice@example.com,bob@example.com
+```
+
+Register `https://sync.example.com/auth/oidc/callback` as the callback URL in
+the provider. Other providers, forward-auth setups and Caddy / Traefik / nginx
+examples: [docs/self-hosting.md](docs/self-hosting.md).
 
 ## Development: watching the browser
 
@@ -228,10 +266,6 @@ doesn't depend on the folder). Back it up with your `.env`.
 To change the port, set `HOST_PORT` (the port on the server) in `.env`.
 `SURE_SYNC_PORT` changes the port inside the container; the compose file and
 health check follow it.
-
-Other environment variables: `SURE_SYNC_HOST` (listen address, default all),
-`SURE_SYNC_PORT`, `SURE_SYNC_DATA_DIR`, `SURE_SYNC_ADMIN_USER` (default
-`admin`), `LOG_LEVEL` (debug, info, warn, error).
 
 ## Login and reverse proxies
 
