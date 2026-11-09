@@ -419,6 +419,15 @@ describe("log masking", async () => {
   });
 });
 
+describe("macquarie robot check", async () => {
+  const { ROBOT_TEXT } = await import("../src/providers/macquarie.js");
+  it("matches straight and curly apostrophes", () => {
+    expect(ROBOT_TEXT.test("Confirm you’re not a robot by selecting the checkbox below.")).toBe(true);
+    expect(ROBOT_TEXT.test("I'm not a robot")).toBe(true);
+    expect(ROBOT_TEXT.test("Log in to Macquarie")).toBe(false);
+  });
+});
+
 describe("macquarie csv", async () => {
   const { parseMacquarieCsv } = await import("../src/providers/macquarie.js");
   const acct = { id: "182-182 000000001", name: "Offset Account 1", currency: "AUD" };

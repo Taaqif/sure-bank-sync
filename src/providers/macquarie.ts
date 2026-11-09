@@ -55,7 +55,7 @@ const VERIFY_SUBMIT = /^\s*(verify|confirm|continue|submit|next)\s*$/i;
 const ERROR_TEXT = /(incorrect|invalid|doesn'?t match|not recognised).{0,40}(id|password|details)|account (is |has been )?(locked|suspended)|too many (failed )?attempts/i;
 const APP_APPROVAL_TEXT = /approve.{0,40}(app|notification|device|login|log in|sign ?in)|check your (phone|device|app)|sent a (notification|request)|waiting for (approval|you to approve)/i;
 /** Macquarie's own "Help us keep your account secure / I'm not a robot" check. */
-const ROBOT_TEXT = /confirm you'?re not a robot|i'?m not a robot/i;
+export const ROBOT_TEXT = /confirm you['’]?re not a robot|i['’]?m not a robot|help us keep your account secure/i;
 const CODE_TEXT = /(sms|text message|one[- ]time|verification|security) code|enter the code|code (we|that we) sent/i;
 
 const visible = (l: Locator) => l.first().isVisible().catch(() => false);
