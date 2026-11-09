@@ -1261,7 +1261,7 @@ const REMOTE_JS = `
   });
   // Paste: Ctrl/Cmd+V on the picture or in the Keyboard box, or the Paste button.
   const pasteText = (text) => {
-    text = (text || "").replace(/\r\n?/g, "\n");
+    text = (text || "").replace(/\\r\\n?/g, "\\n");
     if (!text) return;
     if (text.length > 2000) { status.textContent = "That's too long to paste (2000 characters max)."; return; }
     send({ type: "text", text });
