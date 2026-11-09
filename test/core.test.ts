@@ -404,3 +404,26 @@ describe("log masking", async () => {
     expect(maskAccountId("amex")).toBe("amex");
   });
 });
+
+describe("macquarie csv", async () => {
+  const { parseMacquarieCsv } = await import("../src/providers/macquarie.js");
+  const acct = { id: "182-182 000000001", name: "Offset Account 1", currency: "AUD" };
+  it("reads debit/credit columns", () => {
+    const csv = [
+      "Transaction Date,Details,Account,Category,Subcategory,Tags,Notes,Debit,Credit,Balance,Original Description",
+      '07 Nov 2026,Woolworths,Offset Account 1,Groceries,,,,"1,204.50",,100.00,WOOLWORTHS 4321 PERTH',
+      "06 Nov 2026,Salary,Offset Account 1,Income,,,,,2500.00,1304.50,ACME PAY",
+    ].join("\n");
+    expect(parseMacquarieCsv(csv, acct).map((t) => [t.date, t.amountCents, t.description])).toEqual([
+      ["2026-11-07", -120450, "Woolworths"],
+      ["2026-11-06", 250000, "Salary"],
+    ]);
+  });
+  it("reads a signed amount column", () => {
+    const csv = "Date,Description,Amount,Balance\n9/11/2026,COFFEE,-4.50,10.00\n";
+    expect(parseMacquarieCsv(csv, acct)).toEqual([{ account: acct, date: "2026-11-09", amountCents: -450, description: "COFFEE" }]);
+  });
+  it("rejects files it can't read", () => {
+    expect(() => parseMacquarieCsv("foo,bar\n1,2\n", acct)).toThrow(/no header/);
+  });
+});

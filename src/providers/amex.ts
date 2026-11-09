@@ -19,7 +19,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Locator, Page, Response } from "playwright";
 import { parseAmount, type BankAccount, type BankTransaction } from "../models.js";
-import { parseCsv } from "./csv.js";
+import { bankDate, parseCsv } from "./csv.js";
 import { AuthError, ProviderError, captureJson, pause, settle, snapshot, type ProviderContext, type ProviderDefinition } from "./base.js";
 
 const LOGIN_URL = "https://www.americanexpress.com/en-au/account/login";
@@ -59,19 +59,7 @@ const SEND_CHOICE = /sms|text|e-?mail|call|phone|mobile|send|\*{2,}|•{2,}/i;
 const visible = (l: Locator) => l.first().isVisible().catch(() => false);
 
 /** "03/10/2026", "3 Oct 2026", "03 Oct. 2026", "2026-10-03" -> "2026-10-03" */
-export function amexDate(s: string): string | null {
-  const v = s.trim();
-  let m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(v);
-  if (m) return `${m[3]}-${m[2]!.padStart(2, "0")}-${m[1]!.padStart(2, "0")}`;
-  m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
-  if (m) return v;
-  m = /^(\d{1,2})\s+([A-Za-z]{3})[a-z]*\.?\s+(\d{4})$/.exec(v);
-  if (m) {
-    const mon = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"].indexOf(m[2]!.toLowerCase());
-    if (mon >= 0) return `${m[3]}-${String(mon + 1).padStart(2, "0")}-${m[1]!.padStart(2, "0")}`;
-  }
-  return null;
-}
+export const amexDate = bankDate;
 
 /**
  * Does the User ID Amex pre-filled ("Ta*****", maybe with visible trailing
