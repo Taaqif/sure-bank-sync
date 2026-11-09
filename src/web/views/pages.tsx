@@ -334,97 +334,140 @@ export const SettingsPage = (p: { s: Settings; storage?: StorageInfo; msg?: stri
 );
 
 /** Settings -> Storage: what uses disk space, and cleanup where it's safe. */
-const StorageSection = ({ st }: { st: StorageInfo }) => (
-  <>
-    <h2 id="storage">Storage</h2>
-    <div class="card">
-      <table class="storage">
-        <tr>
-          <th>What</th>
-          <th>Size</th>
-          <th />
-        </tr>
-        <tr>
-          <td>
-            Database
-            <div class="hint">
-              {plural(st.runs, "run")} (logs {mb(st.logBytes)}), {plural(st.synced, "synced transaction record")}, settings and
-              logins
-            </div>
-          </td>
-          <td>{mb(st.dbBytes)}</td>
-          <td>
-            <form method="post" action="/settings/storage/runs" class="row" onsubmit="return confirm('Delete these runs and their logs?')">
-              <select name="olderThanDays" style="width:auto">
-                <option value="90">older than 90 days</option>
-                <option value="30" selected>older than 30 days</option>
-                <option value="7">older than 7 days</option>
-                <option value="0">all finished runs</option>
-              </select>
-              <button type="submit" class="secondary">
-                Delete runs
-              </button>
-            </form>
-          </td>
-        </tr>
-        <tr>
-          <td>
-            Debug files
-            <div class="hint">Screenshots, page HTML, browser logs and downloads of {plural(st.debugRuns, "run")}</div>
-          </td>
-          <td>{mb(st.debugBytes)}</td>
-          <td>
-            <form method="post" action="/settings/storage/debug" onsubmit="return confirm('Delete all debug files? Runs in progress keep theirs.')">
-              <button type="submit" class="secondary" disabled={st.debugRuns === 0}>
-                Delete debug files
-              </button>
-            </form>
-          </td>
-        </tr>
-        <tr>
-          <td>
-            App log
-            <div class="hint">What the Logs page shows</div>
-          </td>
-          <td>{mb(st.appLogBytes)}</td>
-          <td>
-            <form method="post" action="/settings/storage/app-log" onsubmit="return confirm('Clear the app log?')">
-              <button type="submit" class="secondary">
-                Clear app log
-              </button>
-            </form>
-          </td>
-        </tr>
-        <tr>
-          <td>
-            Saved browsers
-            <div class="hint">
-              {plural(st.browser.profiles, "connection")}: cookies, sessions and remembered devices
-            </div>
-          </td>
-          <td>{mb(st.browser.bytes)}</td>
-          <td>
-            <form
-              method="post"
-              action="/settings/clear-browsers"
-              onsubmit="return confirm('Delete every saved browser? All connections are logged out and banks will treat the next login as a new device (expect identity checks).')"
-            >
-              <button type="submit" class="danger" disabled={st.browser.profiles === 0}>
-                Clear all browser data
-              </button>
-            </form>
-          </td>
-        </tr>
-      </table>
-      <div class="hint" style="padding:0 16px 14px">
-        Kept automatically: the last 500 runs and debug files of the last 30. Synced transaction records are never
-        deleted here: they stop transactions being sent to Sure twice. Debug files can contain account details. Clearing
-        saved browsers logs every connection out, so banks treat the next login as a new device (expect identity
-        checks).
+const StorageSection = ({ st }: { st: StorageInfo }) => {
+  const total = st.dbBytes + st.debugBytes + st.appLogBytes + st.browser.bytes;
+  return (
+    <>
+      <h2 id="storage">Storage</h2>
+      <div class="card">
+        <table class="storage">
+          <tr>
+            <th>What</th>
+            <th>Size</th>
+            <th />
+          </tr>
+          <tr>
+            <td>
+              Database
+              <div class="hint">
+                {plural(st.runs, "run")} (logs {mb(st.logBytes)}), {plural(st.synced, "synced transaction record")},
+                settings and logins. The last 500 runs are kept automatically. Synced records are never deleted: they
+                stop transactions being sent to Sure twice.
+              </div>
+            </td>
+            <td>{mb(st.dbBytes)}</td>
+            <td>
+              <form method="post" action="/settings/storage/runs" class="row" onsubmit="return confirm('Delete these runs and their logs?')">
+                <select name="olderThanDays" style="width:auto">
+                  <option value="90">older than 90 days</option>
+                  <option value="30" selected>older than 30 days</option>
+                  <option value="7">older than 7 days</option>
+                  <option value="0">all finished runs</option>
+                </select>
+                <button type="submit" class="secondary">
+                  Delete runs
+                </button>
+              </form>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              Debug files
+              <div class="hint">
+                Screenshots, page HTML, browser logs and downloads of {plural(st.debugRuns, "run")}. The last 30 are kept
+                automatically. They can contain account details.
+              </div>
+            </td>
+            <td>{mb(st.debugBytes)}</td>
+            <td>
+              <form method="post" action="/settings/storage/debug" onsubmit="return confirm('Delete all debug files? Runs in progress keep theirs.')">
+                <button type="submit" class="secondary" disabled={st.debugRuns === 0}>
+                  Delete debug files
+                </button>
+              </form>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              App log
+              <div class="hint">What the Logs page shows.</div>
+            </td>
+            <td>{mb(st.appLogBytes)}</td>
+            <td>
+              <form method="post" action="/settings/storage/app-log" onsubmit="return confirm('Clear the app log?')">
+                <button type="submit" class="secondary">
+                  Clear app log
+                </button>
+              </form>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              Saved browsers
+              <div class="hint">
+                Cookies, sessions and remembered devices of {plural(st.browser.profiles, "connection")}. Clearing logs
+                every connection out; banks then treat the next login as a new device (expect identity checks).
+              </div>
+            </td>
+            <td>{mb(st.browser.bytes)}</td>
+            <td>
+              <form
+                method="post"
+                action="/settings/clear-browsers"
+                onsubmit="return confirm('Delete every saved browser? All connections are logged out and banks will treat the next login as a new device (expect identity checks).')"
+              >
+                <button type="submit" class="danger" disabled={st.browser.profiles === 0}>
+                  Clear all browser data
+                </button>
+              </form>
+            </td>
+          </tr>
+          <tr class="total">
+            <td>Total</td>
+            <td>{mb(total)}</td>
+            <td />
+          </tr>
+        </table>
       </div>
-    </div>
-  </>
-);
+
+      <h2>Delete everything</h2>
+      <div class="card danger-card">
+        <form
+          class="stack"
+          method="post"
+          action="/settings/storage/everything"
+          onsubmit="const v = prompt('Delete all run history, debug files, the app log and every saved browser? All connections are logged out.\n\nType DELETE to confirm.'); if (v !== 'DELETE') return false; this.confirm.value = v; return true;"
+        >
+          <div class="cols">
+            <div>
+              <strong>Deleted</strong>
+              <ul>
+                <li>Run history and logs</li>
+                <li>Debug files</li>
+                <li>App log</li>
+                <li>Saved browsers (every connection is logged out)</li>
+              </ul>
+            </div>
+            <div>
+              <strong>Kept</strong>
+              <ul>
+                <li>Settings and household</li>
+                <li>Connections, logins and account mappings</li>
+                <li>Synced transaction records</li>
+              </ul>
+            </div>
+          </div>
+          <input type="hidden" name="confirm" value="" />
+          <div>
+            <button type="submit" class="danger">
+              Delete everything ({mb(total - st.dbBytes + st.logBytes)})
+            </button>
+          </div>
+        </form>
+      </div>
+    </>
+  );
+};
 
 // --- household -------------------------------------------------------------
 

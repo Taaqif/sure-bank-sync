@@ -271,7 +271,7 @@ describe("web", () => {
     mkdirSync(profile, { recursive: true });
     writeFileSync(join(profile, "Cookies"), "x".repeat(2000));
     const html = await (await get(app, "/settings")).text();
-    expect(html).toContain("1 connection: cookies");
+    expect(html).toContain("remembered devices of 1 connection");
     expect(html).toContain("2 KB");
     const r = await app.request("/settings/clear-browsers", form({}));
     expect(r.headers.get("location")).toContain("Cleared%201%20saved%20browser");
@@ -292,7 +292,7 @@ describe("web", () => {
     expect(await (await get(app, "/settings")).text()).toContain("2 runs");
 
     let r = await app.request("/settings/storage/runs", form({ olderThanDays: "30" }));
-    expect(r.headers.get("location")).toContain("Deleted%201%20run");
+    expect(r.headers.get("location")).toMatch(/^\/settings\?msg=Deleted%201%20run.*#storage$/);
     expect(env.runs.get(old)).toBeUndefined();
     expect(env.runs.get(recent)).toBeDefined();
 
@@ -302,5 +302,16 @@ describe("web", () => {
 
     r = await app.request("/settings/storage/runs", form({ olderThanDays: "5" }));
     expect(r.headers.get("location")).toContain("Error");
+
+    // Delete everything needs DELETE typed; settings and synced records stay.
+    mkdirSync(join(env.dir, "browser", "alice-anz"), { recursive: true });
+    r = await app.request("/settings/storage/everything", form({ confirm: "yes" }));
+    expect(r.headers.get("location")).toContain("Error");
+    expect(env.runs.get(recent)).toBeDefined();
+    r = await app.request("/settings/storage/everything", form({ confirm: "DELETE" }));
+    expect(r.headers.get("location")).toContain("Deleted%201%20run");
+    expect(env.runs.get(recent)).toBeUndefined();
+    expect(existsSync(join(env.dir, "browser"))).toBe(false);
+    expect(env.store.connections()).toHaveLength(1);
   });
 });

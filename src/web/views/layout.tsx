@@ -89,6 +89,15 @@ button.link:hover { color: var(--fg); }
 table.storage td:nth-child(2) { white-space: nowrap; }
 table.storage td:last-child { text-align: right; }
 table.storage td:last-child form { justify-content: flex-end; }
+table.storage td:first-child, table.storage td .hint { white-space: normal; }
+table.storage td:first-child { width: 55%; }
+table.storage td:last-child form.row { flex-wrap: nowrap; }
+table.storage select { min-width: 0; }
+table.storage td .hint { margin-top: 2px; }
+table.storage tr.total td { font-weight: 600; }
+.danger-card { border-color: var(--bad); }
+.danger-card .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.danger-card ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); }
 .pager { display: flex; gap: 14px; align-items: center; justify-content: center; margin: 10px 0 0; font-size: 13px; }
 .mfa.attention { border-width: 2px; animation: attention 1.6s ease-in-out 3; }
 @keyframes attention { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn) 35%, transparent); } }

@@ -71,8 +71,9 @@ export class RunStore {
     return { runs: r?.n ?? 0, logBytes: r?.bytes ?? 0, synced: s?.n ?? 0 };
   }
 
-  /** Delete finished runs started more than `days` ago. Returns how many. */
+  /** Delete finished runs started more than `days` ago (0: all finished runs). Returns how many. */
   deleteFinishedOlderThan(days: number, now = Date.now()): number {
+    if (days <= 0) return this.db.run(sql`DELETE FROM runs WHERE status NOT IN ('running', 'awaiting_mfa')`).changes;
     const cutoff = new Date(now - days * 86_400_000).toISOString().replace(/\.\d{3}Z$/, "Z");
     const res = this.db.run(
       sql`DELETE FROM runs WHERE status NOT IN ('running', 'awaiting_mfa') AND started_at < ${cutoff}`,

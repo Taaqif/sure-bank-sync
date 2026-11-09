@@ -62,8 +62,13 @@ const str = (b: Body, k: string): string => {
   return typeof v === "string" ? v : "";
 };
 
+/** Redirect with an optional flash message (kept before any #fragment so the server sees it). */
 function redirect(c: Context, url: string, msg?: string) {
-  if (msg) url += (url.includes("?") ? "&" : "?") + "msg=" + encodeURIComponent(msg);
+  if (msg) {
+    const at = url.indexOf("#");
+    const [path, hash] = at >= 0 ? [url.slice(0, at), url.slice(at)] : [url, ""];
+    url = path + (path.includes("?") ? "&" : "?") + "msg=" + encodeURIComponent(msg) + hash;
+  }
   return c.redirect(url, 303);
 }
 
@@ -323,6 +328,20 @@ export function createApp(svc: Services) {
     await Promise.all(dirs.map((d) => rm(join(root, d), { recursive: true, force: true })));
     log.info(`deleted debug files of ${dirs.length} runs`);
     return redirect(c, "/settings#storage", `Deleted debug files of ${dirs.length} run${dirs.length === 1 ? "" : "s"}`);
+  });
+
+  // Everything in the Storage list at once. Settings, household, logins and
+  // synced transaction records stay. Needs "DELETE" typed to confirm.
+  app.post("/settings/storage/everything", async (c) => {
+    if ((await c.req.parseBody()).confirm !== "DELETE") return redirect(c, "/settings#storage", "Error: type DELETE to confirm");
+    if (svc.runner.anyRunning()) return redirect(c, "/settings#storage", "Error: stop the runs in progress first");
+    const n = runs.deleteFinishedOlderThan(0);
+    runs.compact();
+    await rm(join(svc.dataDir, "debug"), { recursive: true, force: true });
+    await rm(join(svc.dataDir, "browser"), { recursive: true, force: true });
+    clearLogFile();
+    log.info(`deleted everything from Settings: ${n} runs, debug files, app log, saved browsers`);
+    return redirect(c, "/settings#storage", `Deleted ${n} run${n === 1 ? "" : "s"}, all debug files, the app log and every saved browser`);
   });
 
   app.post("/settings/storage/app-log", (c) => {
