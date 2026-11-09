@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}{{ conn.id }} · Bank Sync{% endblock %}
+{% block content %}
+<h2>{{ user.name }} · {{ conn.id }} <span class="muted">({{ conn.provider }})</span></h2>
+<div class="card">
+<table>
+  <tr><th>Bank account match</th><th>Sure account id</th></tr>
+  {% for m in conn.accounts %}
+  <tr><td>{{ m.match }}</td><td class="muted">{{ m.sure_account_id }}</td></tr>
+  {% else %}
+  <tr><td colspan="2" class="muted">No account mappings configured: every transaction will be skipped.</td></tr>
+  {% endfor %}
+</table>
+</div>
+<h2>Runs</h2>
+{% include "_runs.html" %}
+{% endblock %}

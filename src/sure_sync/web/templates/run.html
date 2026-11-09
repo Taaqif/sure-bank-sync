@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Run {{ run.id }} · Bank Sync{% endblock %}
+{% block content %}
+<h2>Run #{{ run.id }} · <a href="/connections/{{ run.connection_id }}">{{ run.connection_id }}</a>
+  <span class="badge {{ run.status }}">{{ run.status }}</span></h2>
+<p class="muted">
+  {{ run.trigger }} · started {{ run.started_at }}{% if run.finished_at %} · finished {{ run.finished_at }}{% endif %}<br>
+  fetched {{ run.fetched }} · new {{ run.created }} · already synced {{ run.skipped }} · unmapped {{ run.unmapped }}
+</p>
+{% if run.error %}<pre class="failed">{{ run.error }}</pre>{% endif %}
+<h2>Log</h2>
+<pre>{{ run.log or "(empty)" }}</pre>
+{% if shots %}
+<h2>Debug screenshots</h2>
+<div class="shots">
+  {% for s in shots %}
+  <p class="muted">{{ s }} · <a href="/runs/{{ run.id }}/debug/{{ s[:-4] }}.html">html</a></p>
+  <a href="/runs/{{ run.id }}/debug/{{ s }}"><img src="/runs/{{ run.id }}/debug/{{ s }}" alt="{{ s }}"></a>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

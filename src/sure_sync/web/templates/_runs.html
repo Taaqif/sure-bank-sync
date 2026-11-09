@@ -1,0 +1,21 @@
+<div class="card">
+<table>
+  <tr><th>#</th><th>Connection</th><th>Trigger</th><th>Status</th><th>Started</th><th>Fetched</th><th>New</th><th>Skipped</th><th>Unmapped</th><th>Error</th></tr>
+  {% for run in runs %}
+  <tr>
+    <td><a href="/runs/{{ run.id }}">{{ run.id }}</a></td>
+    <td>{{ run.connection_id }}</td>
+    <td class="muted">{{ run.trigger }}</td>
+    <td><span class="badge {{ run.status }}">{{ run.status }}</span></td>
+    <td>{{ run.started_at | ago }}</td>
+    <td>{{ run.fetched }}</td>
+    <td>{{ run.created }}</td>
+    <td>{{ run.skipped }}</td>
+    <td>{{ run.unmapped }}</td>
+    <td class="err" title="{{ run.error or '' }}">{{ run.error or "" }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="10" class="muted">No runs yet.</td></tr>
+  {% endfor %}
+</table>
+</div>

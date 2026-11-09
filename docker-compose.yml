@@ -1,0 +1,26 @@
+services:
+  sure-bank-sync:
+    build: .
+    image: sure-bank-sync:latest
+    container_name: sure-bank-sync
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-8686}:8686"
+    env_file: .env
+    environment:
+      TZ: ${TZ:-Australia/Melbourne}
+    volumes:
+      - ./config:/config:ro
+      - sure-sync-data:/data
+    # Chromium needs more shared memory than Docker's 64MB default
+    shm_size: "1gb"
+    # If Sure runs in another compose project, join its network instead:
+    # networks: [sure]
+
+volumes:
+  sure-sync-data:
+
+# networks:
+#   sure:
+#     external: true
+#     name: sure_default
