@@ -135,6 +135,7 @@ export const anz: ProviderDefinition = {
     { key: "password", label: "Password", secret: true },
   ],
   // ANZ's download offers these durations; longer needs the date-range tab (not implemented).
+  startUrl: LOGIN_URL,
   syncPeriod: { choices: DURATIONS, default: 14, note: "ANZ downloads in these fixed durations (max 120 days)." },
   create: (ctx: ProviderContext) => {
     // Full API responses hold account data: only capture them on debug runs.

@@ -110,6 +110,7 @@ export const macquarie: ProviderDefinition = {
     { key: "password", label: "Password", secret: true },
   ],
   // The transactions date filter takes any range, so any period works.
+  startUrl: LOGIN_URL,
   syncPeriod: { choices: [7, 14, 30, 60, 90, 180, 365], default: 14 },
   create: (ctx: ProviderContext) => {
     // Full API responses hold account data: only capture them on debug runs.

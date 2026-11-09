@@ -42,6 +42,8 @@ export class RemoteSession {
     readonly prompt: string,
     private readonly page: Page,
     private readonly cdp: CDPSession,
+    /** label of the "Done" button in the browser view */
+    readonly doneLabel = "Done",
   ) {}
 
   /** Get frames (the latest one straight away) until the session ends. */
@@ -121,10 +123,10 @@ export class RemoteHub {
   }
 
   /** Start streaming `page` for a connection (replaces an older session). */
-  async open(connectionId: string, page: Page, prompt: string): Promise<RemoteSession> {
+  async open(connectionId: string, page: Page, prompt: string, doneLabel?: string): Promise<RemoteSession> {
     await this.close(connectionId);
     const cdp = await page.context().newCDPSession(page);
-    const session = new RemoteSession(connectionId, prompt, page, cdp);
+    const session = new RemoteSession(connectionId, prompt, page, cdp, doneLabel);
     cdp.on("Page.screencastFrame", (ev) => {
       session.emit({ data: ev.data, width: ev.metadata.deviceWidth, height: ev.metadata.deviceHeight });
       cdp.send("Page.screencastFrameAck", { sessionId: ev.sessionId }).catch(() => {});

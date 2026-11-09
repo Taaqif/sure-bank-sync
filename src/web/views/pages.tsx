@@ -6,6 +6,7 @@ import type { Connection, Settings, User } from "../../store.js";
 import type { SureAccount } from "../../sureClient.js";
 import { useContext } from "hono/jsx";
 import { BareLayout, Layout, NeedsBrowser, UiContext } from "./layout.js";
+import { RECIPE_SUGGESTIONS, type RecordedStep, type Recording } from "../../recorder.js";
 import { Badge, CredentialInputs, RunsTable, ago, formatWhen } from "./parts.js";
 import { LookbackField, SCHEDULE_JS, ScheduleField } from "./schedule.js";
 
@@ -625,6 +626,8 @@ export const ConnectionPage = (p: {
       <h2 id="runs">Runs</h2>
       <RunsTable {...p.runs} href={(n) => `/connections/${encodeURIComponent(p.conn.id)}${n > 1 ? `?runs=${n}` : ""}#runs`} />
 
+      {ui.debugTools && <TrainForm connectionId={p.conn.id} running={p.running} canStartLoggedOut={!!p.provider?.startUrl} />}
+
       <h2>Edit connection</h2>
       <div class="card">
         <form class="stack" method="post" action={`/connections/${p.conn.id}`}>
@@ -668,6 +671,113 @@ export const ConnectionPage = (p: {
 };
 
 // --- runs ------------------------------------------------------------------
+
+/** Debug tools: record a person's steps in the bank site as a named recipe. */
+const TrainForm = (p: { connectionId: string; running: boolean; canStartLoggedOut: boolean }) => (
+  <>
+    <h2 id="train">
+      Train <span class="tag">debug</span>
+    </h2>
+    <div class="card">
+      <form class="stack" method="post" action={`/connections/${p.connectionId}/train`}>
+        <p class="hint" style="margin:0">
+          Record your steps in the bank's site. Each click, typed value and download is saved with a screenshot until
+          you press <strong>Finish recording</strong>. Passwords and codes aren't recorded; values matching the stored
+          login are saved as placeholders. The steps appear on the run's page.
+        </p>
+        <label>
+          Recipe
+          <select name="recipe" onchange="document.getElementById('train-other').hidden = this.value !== '';">
+            {RECIPE_SUGGESTIONS.map((r) => (
+              <option value={r}>{r}</option>
+            ))}
+            <option value="">Other…</option>
+          </select>
+          <small>What you're about to show, e.g. setting the date filter.</small>
+        </label>
+        <label id="train-other" hidden>
+          Recipe name
+          <input type="text" name="recipeOther" pattern="[a-zA-Z0-9][a-zA-Z0-9 -]{0,39}" placeholder="e.g. statements" />
+          <small>Letters, numbers and dashes.</small>
+        </label>
+        <label class="check">
+          <input type="checkbox" name="login" value="1" checked disabled={!p.canStartLoggedOut} />
+          Log in first with the stored login
+        </label>
+        {!p.canStartLoggedOut && <input type="hidden" name="login" value="1" />}
+        <div>
+          <button type="submit" disabled={p.running}>
+            Start recording
+          </button>
+        </div>
+      </form>
+    </div>
+  </>
+);
+
+const stepAction = (s: RecordedStep) => {
+  switch (s.kind) {
+    case "click":
+      return `click ${s.el?.name ? `"${s.el.name.slice(0, 60)}"` : s.el?.tag ?? ""}`;
+    case "fill":
+      return `type ${s.masked ? "(secret, not recorded)" : `"${s.value ?? ""}"`} into ${s.el?.name ? `"${s.el.name.slice(0, 40)}"` : s.el?.tag ?? "a field"}`;
+    case "select":
+      return `choose "${s.value ?? ""}"`;
+    case "press":
+      return `press ${s.key}`;
+    case "nav":
+      return `page: ${s.url}`;
+    case "download":
+      return `download ${s.file}${s.header ? ` (${s.rows} rows; columns: ${s.header.join(", ")})` : ""}`;
+  }
+};
+
+/** Steps of a Train recording, with selector candidates and screenshots. */
+const RecordingView = (p: { runId: number; rec: Recording }) => (
+  <>
+    <h2>
+      Recipe "{p.rec.recipe}" <span class="muted">({p.rec.steps.length} steps)</span>
+    </h2>
+    <p>
+      <a href={`/runs/${p.runId}/debug/recipe-${p.rec.recipe}.json`}>JSON</a>
+    </p>
+    {p.rec.steps.length === 0 && <div class="card empty">Nothing was recorded.</div>}
+    {p.rec.steps.map((s) => (
+      <div class={`card trainstep ${s.kind}`}>
+        <div>
+          <strong>{s.n}.</strong> {stepAction(s)} <span class="muted">· {s.t}s{s.tab ? ` · tab ${s.tab}` : ""}</span>
+        </div>
+        {s.code && <pre class="code">{s.code}</pre>}
+        {s.el && s.el.selectors.length > 0 && (
+          <details>
+            <summary class="muted">selectors and element</summary>
+            <ul class="sel">
+              {s.el.selectors.map((c) => (
+                <li>
+                  <code>{c.kind === "role" ? `role=${c.role} name="${c.name}"` : c.kind === "testid" ? `[${c.attr}="${c.value}"]` : `${c.kind}: ${c.value}`}</code>
+                </li>
+              ))}
+            </ul>
+            <pre class="code">{s.el.html}</pre>
+          </details>
+        )}
+        {s.shot && (
+          <p class="muted">
+            <a href={`/runs/${p.runId}/debug/${s.shot}`}>
+              <img class="stepshot" src={`/runs/${p.runId}/debug/${s.shot}`} alt={`step ${s.n}`} loading="lazy" />
+            </a>
+            {s.htmlFile && (
+              <>
+                <br />
+                <a href={`/runs/${p.runId}/debug/${s.htmlFile}`}>page html</a>
+              </>
+            )}
+          </p>
+        )}
+      </div>
+    ))}
+  </>
+);
 
 /** Stops the connection's run in progress (closes its browser). */
 export const CancelButton = (p: { connectionId: string }) => (
@@ -727,7 +837,7 @@ const RUN_LIVE_JS = `
 export const runStats = (run: Run) =>
   `fetched ${run.fetched} · ${run.dryRun ? "would create" : "new"} ${run.created} · already synced ${run.skipped} · unmapped ${run.unmapped}`;
 
-export const RunPage = (p: { run: Run; shots: string[]; logs?: string[]; msg?: string }) => {
+export const RunPage = (p: { run: Run; shots: string[]; logs?: string[]; recordings?: Recording[]; msg?: string }) => {
   const live = p.run.status === "running" || p.run.status === "awaiting_mfa";
   return (
   <Layout title={`Run ${p.run.id}`} nav="dashboard" msg={p.msg} script={live ? RUN_LIVE_JS : undefined}>
@@ -767,6 +877,9 @@ export const RunPage = (p: { run: Run; shots: string[]; logs?: string[]; msg?: s
         </p>
       </>
     )}
+    {(p.recordings ?? []).map((rec) => (
+      <RecordingView runId={p.run.id} rec={rec} />
+    ))}
     {p.shots.length > 0 && (
       <>
         <h2>Debug screenshots</h2>
@@ -1022,8 +1135,13 @@ const REMOTE_JS = `
   window.refreshLive = () => {};
 })();`;
 
-export const RemotePage = (p: { connectionId: string; prompt?: string }) => (
-  <Layout title={`Browser · ${p.connectionId}`} nav="dashboard" hideNeeds script={p.prompt ? REMOTE_JS : undefined}>
+export const RemotePage = (p: { connectionId: string; prompt?: string; doneLabel?: string; starting?: boolean }) => (
+  <Layout
+    title={`Browser · ${p.connectionId}`}
+    nav="dashboard"
+    hideNeeds
+    script={p.prompt ? REMOTE_JS : p.starting ? "setTimeout(() => location.reload(), 2000);" : undefined}
+  >
     <div class="row between">
       <h2>
         <a href={`/connections/${p.connectionId}`}>{p.connectionId}</a> · browser
@@ -1032,8 +1150,8 @@ export const RemotePage = (p: { connectionId: string; prompt?: string }) => (
       {p.prompt && (
         <div class="row">
           <form method="post" action={`/connections/${p.connectionId}/remote/done`}>
-            <button type="submit" class="secondary" title="Tell the run to carry on">
-              Done
+            <button type="submit" title="Tell the run to carry on">
+              {p.doneLabel ?? "Done"}
             </button>
           </form>
           <CancelButton connectionId={p.connectionId} />
@@ -1070,7 +1188,11 @@ export const RemotePage = (p: { connectionId: string; prompt?: string }) => (
         </details>
       </div>
     ) : (
-      <div class="card empty">Nothing is waiting for you in the browser right now.</div>
+      <div class="card empty">
+        {p.starting
+          ? "The run is starting (logging in etc.). This page opens the browser view when it's ready…"
+          : "Nothing is waiting for you in the browser right now."}
+      </div>
     )}
   </Layout>
 );

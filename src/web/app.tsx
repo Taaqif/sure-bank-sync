@@ -10,6 +10,7 @@ import { logger, tailLog } from "../log.js";
 import type { MfaBroker } from "../mfa.js";
 import { PROVIDERS, syncLabel } from "../providers/index.js";
 import { DEBUG_TOOLS, type Runner } from "../runner.js";
+import { RECIPE_RE, type Recording } from "../recorder.js";
 import { cronPreview, describeCron } from "../schedule.js";
 import type { RunStore } from "../runs.js";
 import type { Scheduler } from "../scheduler.js";
@@ -529,12 +530,28 @@ export function createApp(svc: Services) {
     return redirect(c, `/connections/${id}#runs`, ok ? `Cancelled the run of ${id}` : `${id} isn't running`);
   });
 
+  // Train (debug tools only): record a person's steps as a named recipe.
+  app.post("/connections/:id/train", async (c) => {
+    const id = c.req.param("id");
+    if (!store.connection(id)) return c.notFound();
+    if (!DEBUG_TOOLS) return redirect(c, `/connections/${id}`, "Error: Train needs SURE_SYNC_DEBUG=1");
+    const b = await c.req.parseBody();
+    const recipe = (str(b, "recipe") || str(b, "recipeOther")).toLowerCase().replace(/\s+/g, "-");
+    if (!RECIPE_RE.test(recipe)) return redirect(c, `/connections/${id}`, "Error: recipe name: letters, numbers and dashes only");
+    if (svc.runner.isRunning(id)) return redirect(c, `/connections/${id}`, "Error: wait for the current run to finish");
+    svc.runner.startBackground(id, { train: { recipe, login: b.login === "1" } });
+    return c.redirect(`/connections/${id}/remote`, 303);
+  });
+
   // --- remote browser view (a person solves a CAPTCHA etc.) ----------------
   app.get("/connections/:id/remote", (c) => {
     const id = c.req.param("id");
     if (!store.connection(id)) return c.notFound();
     const session = svc.runner.remote.get(id);
-    return page(c, <RemotePage connectionId={id} prompt={session?.prompt} />);
+    return page(
+      c,
+      <RemotePage connectionId={id} prompt={session?.prompt} doneLabel={session?.doneLabel} starting={!session && svc.runner.isRunning(id)} />,
+    );
   });
 
   app.get("/connections/:id/remote/stream", (c) => {
@@ -652,7 +669,15 @@ export function createApp(svc: Services) {
     if (!run) return c.notFound();
     const files = await readdir(join(svc.dataDir, "debug", `run-${run.id}`)).catch(() => [] as string[]);
     const logs = ["console.txt", "network.txt"].filter((f) => files.includes(f));
-    return page(c, <RunPage run={run} shots={files.filter((f) => f.endsWith(".png")).sort()} logs={logs} msg={msgOf(c)} />);
+    const recordings: Recording[] = [];
+    for (const f of files.filter((f) => /^recipe-.+\.json$/.test(f)).sort()) {
+      const text = await readFile(join(svc.dataDir, "debug", `run-${run.id}`, f), "utf8").catch(() => "");
+      try {
+        recordings.push(JSON.parse(text) as Recording);
+      } catch {}
+    }
+    const shots = files.filter((f) => f.endsWith(".png") && !f.startsWith("train-")).sort();
+    return page(c, <RunPage run={run} shots={shots} logs={logs} recordings={recordings} msg={msgOf(c)} />);
   });
 
   // Live run page: log lines after `from`, status and counts.

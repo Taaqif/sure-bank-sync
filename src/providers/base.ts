@@ -31,7 +31,14 @@ export interface ProviderContext {
    * Hand `page` to a person through the web UI's remote browser view (e.g. to
    * solve a CAPTCHA). Resolves when `until` returns true or they click Done.
    */
-  requestBrowserHelp: (page: Page, prompt: string, until?: () => Promise<boolean>) => Promise<void>;
+  requestBrowserHelp: (page: Page, prompt: string, until?: () => Promise<boolean>, opts?: BrowserHelpOptions) => Promise<void>;
+}
+
+export interface BrowserHelpOptions {
+  /** how long to wait for the person (default: the MFA timeout setting) */
+  timeoutMs?: number;
+  /** label of the browser view's "Done" button */
+  doneLabel?: string;
 }
 
 export const pause = (min: number, max: number) => new Promise((r) => setTimeout(r, min + Math.random() * (max - min)));
@@ -160,5 +167,7 @@ export interface ProviderDefinition {
    * short note shown instead of the picker.
    */
   syncPeriod: SyncPeriod;
+  /** where a Train recording starts when it isn't logging in first */
+  startUrl?: string;
   create(ctx: ProviderContext): BankProvider;
 }

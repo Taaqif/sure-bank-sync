@@ -134,6 +134,7 @@ export const amex: ProviderDefinition = {
     { key: "username", label: "User ID" },
     { key: "password", label: "Password", secret: true },
   ],
+  startUrl: LOGIN_URL,
   syncPeriod: {
     label: "current statement",
     fixed:

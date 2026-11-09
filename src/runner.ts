@@ -4,10 +4,12 @@ import { join } from "node:path";
 import { chromium, type BrowserContext, type Page } from "playwright";
 import { logger } from "./log.js";
 import { virtualDisplay } from "./display.js";
-import { MfaBroker } from "./mfa.js";
+import { MfaBroker, MfaTimeout } from "./mfa.js";
+import { startRecording } from "./recorder.js";
 import { RemoteHub } from "./remote.js";
 import { maskAccountId, type BankTransaction } from "./models.js";
 import { PROVIDERS, syncDays, ProviderError, snapshot, type DateRange, type ProviderContext } from "./providers/index.js";
+import type { BankProvider, ProviderDefinition } from "./providers/base.js";
 import { pushTransactions } from "./push.js";
 import { emptyStats, type RunStore } from "./runs.js";
 import type { ConfigStore, Connection, Settings } from "./store.js";
@@ -34,12 +36,25 @@ export interface RunOptions {
   discover?: boolean;
   /** visible, slowed-down browser + capture; dry run. Ignored unless DEBUG_TOOLS. */
   debug?: boolean;
+  /** record a person's steps as a named recipe (debug run). Ignored unless DEBUG_TOOLS. */
+  train?: TrainOptions;
 }
+
+export interface TrainOptions {
+  /** recipe name, e.g. "date-filter" */
+  recipe: string;
+  /** log in with the stored login first, then record; otherwise start at the provider's startUrl */
+  login: boolean;
+}
+
+/** A person gets this long to record a recipe. */
+const TRAIN_TIMEOUT_MS = 30 * 60_000;
 
 interface RunFlags {
   dryRun: boolean;
   discover: boolean;
   debug: boolean;
+  train?: TrainOptions;
 }
 export class UnknownConnection extends Error {}
 
@@ -243,12 +258,13 @@ export class Runner {
     this.#active.set(connectionId, active);
     try {
       const settings = this.store.settings();
-      const debug = DEBUG_TOOLS && (opts.debug ?? false);
-      const discover = opts.discover ?? false;
+      const train = DEBUG_TOOLS ? opts.train : undefined;
+      const debug = DEBUG_TOOLS && (opts.debug ?? !!train);
+      const discover = !train && (opts.discover ?? false);
       const dryRun = discover || debug || (opts.dryRun ?? settings.dryRun);
-      const runId = this.runs.start(connectionId, conn.userName, discover ? "discover" : trigger, dryRun);
+      const runId = this.runs.start(connectionId, conn.userName, train ? "train" : discover ? "discover" : trigger, dryRun);
       active.runId = runId;
-      await this.#run(runId, conn, settings, { dryRun, discover, debug }, active);
+      await this.#run(runId, conn, settings, { dryRun, discover, debug, train }, active);
       return runId;
     } finally {
       this.#active.delete(connectionId);
@@ -282,7 +298,8 @@ export class Runner {
       if (missing.length) throw new ProviderError(`missing credentials: ${missing.join(", ")}`);
 
       const range = dateRange(settings.timezone, syncDays(conn));
-      if (flags.debug) rlog("DEBUG RUN: visible browser, network capture and downloads kept; nothing written to Sure");
+      if (flags.train) rlog(`TRAIN: recording recipe "${flags.train.recipe}"; nothing fetched or written`);
+      else if (flags.debug) rlog("DEBUG RUN: visible browser, network capture and downloads kept; nothing written to Sure");
       if (discover) rlog("DISCOVER: listing accounts only, no transactions fetched");
       else if (dryRun) rlog("DRY RUN: nothing will be written to Sure");
       rlog(`waiting for browser slot (${conn.provider}, ${range.since} → ${range.until})`);
@@ -291,6 +308,11 @@ export class Runner {
         signal,
       );
       signal.throwIfAborted();
+      if (flags.train) {
+        this.runs.finish(runId, "success", stats);
+        rlog("done: recording saved. The steps are listed on this run's page.");
+        return;
+      }
       if (discover) {
         const n = this.store.bankAccounts(conn.id).length;
         this.runs.finish(runId, "success", stats);
@@ -392,11 +414,11 @@ export class Runner {
           this.runs.setStatus(runId, "running");
         }
       },
-      requestBrowserHelp: async (page, prompt, until) => {
+      requestBrowserHelp: async (page, prompt, until, opts) => {
         rlog(`waiting for you in the browser view: ${prompt}`);
         this.runs.setStatus(runId, "awaiting_mfa");
-        await this.remote.open(conn.id, page, prompt);
-        const answered = this.mfa.request(conn.id, runId, prompt, settings.mfaTimeoutSeconds * 1000, "browser");
+        await this.remote.open(conn.id, page, prompt, opts?.doneLabel);
+        const answered = this.mfa.request(conn.id, runId, prompt, opts?.timeoutMs ?? settings.mfaTimeoutSeconds * 1000, "browser");
         let waiting = true;
         const watch = until
           ? (async () => {
@@ -419,8 +441,13 @@ export class Runner {
         }
       },
     };
-    const provider = PROVIDERS[conn.provider]!.create(ctx);
+    const def = PROVIDERS[conn.provider]!;
+    const provider = def.create(ctx);
     try {
+      if (flags.train) {
+        await this.#train(flags.train, conn, def, provider, ctx, rlog, settings.verboseLogs);
+        return [];
+      }
       await provider.login();
       rlog("logged in");
       if (provider.listAccounts) {
@@ -452,6 +479,54 @@ export class Runner {
       }
       active.browser = undefined;
       await browser.close().catch(() => {});
+    }
+  }
+
+  /** Log in (optional), then record what a person does until they press Finish recording. */
+  async #train(
+    train: TrainOptions,
+    conn: Connection,
+    def: ProviderDefinition,
+    provider: BankProvider,
+    ctx: ProviderContext,
+    rlog: (m: string) => void,
+    verbose: boolean,
+  ): Promise<void> {
+    const browser = ctx.browser;
+    if (train.login) {
+      await provider.login();
+      rlog("logged in; recording starts now");
+    } else {
+      if (!def.startUrl) throw new ProviderError(`${def.label} has no start page; tick "Log in first"`);
+      const page = browser.pages()[0] ?? (await browser.newPage());
+      await page.goto(def.startUrl, { waitUntil: "domcontentloaded" });
+    }
+    const secrets = def.credentialFields.filter((f) => f.secret).map((f) => ctx.credentials[f.key]).filter((v): v is string => !!v);
+    const recorder = await startRecording(browser, {
+      recipe: train.recipe,
+      provider: conn.provider,
+      connectionId: conn.id,
+      dir: ctx.debugDir,
+      credentials: ctx.credentials,
+      secrets,
+      label: navLabel,
+      log: verbose ? rlog : () => {},
+    });
+    try {
+      const pages = browser.pages();
+      const page = pages[pages.length - 1] ?? (await browser.newPage());
+      await ctx.requestBrowserHelp(
+        page,
+        `Recording "${train.recipe}": do the steps in the bank's page (here or in the browser window), then press Finish recording.`,
+        undefined,
+        { timeoutMs: TRAIN_TIMEOUT_MS, doneLabel: "Finish recording" },
+      );
+    } catch (e) {
+      if (!(e instanceof MfaTimeout)) throw e;
+      rlog("recording time limit reached; saving what was recorded");
+    } finally {
+      const rec = await recorder.stop();
+      if (!verbose) rlog(`train: saved ${rec.steps.length} steps`);
     }
   }
 

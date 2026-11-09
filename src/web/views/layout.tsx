@@ -58,6 +58,7 @@ input[type=text], input[type=password], input[type=number], input[type=url], sel
   font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); width: 100%; }
 td select { width: auto; min-width: 220px; }
 textarea { font-family: ui-monospace, monospace; font-size: 12px; min-height: 60px; }
+[hidden] { display: none !important; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .between { justify-content: space-between; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
@@ -93,6 +94,11 @@ button.link:hover { color: var(--fg); }
 .toast.success { border-left-color: var(--ok); } .toast.failed { border-left-color: var(--bad); }
 @keyframes toast-in { from { transform: translateY(8px); opacity: 0; } }
 .hint.preview { display: block; min-height: 1.5em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trainstep { margin-bottom: 8px; }
+.trainstep.nav { padding: 6px 14px; color: var(--muted); }
+.trainstep pre.code { margin: 6px 0 0; padding: 6px 8px; font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+.trainstep ul.sel { margin: 6px 0; padding-left: 18px; font-size: 12px; }
+.stepshot { max-width: min(520px, 100%); border: 1px solid var(--line); border-radius: 6px; margin-top: 6px; }
 .cta { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin: 0 0 14px; padding: 12px 16px; border: 2px solid var(--warn); border-radius: 10px; background: color-mix(in srgb, var(--warn) 12%, var(--card)); animation: attention 1.6s ease-in-out 3; }
 .cta strong { color: var(--warn); }
 .cta small { display: block; color: var(--fg); margin-top: 2px; }

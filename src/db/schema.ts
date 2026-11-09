@@ -60,7 +60,7 @@ export const runs = sqliteTable(
     id: integer("id").primaryKey({ autoIncrement: true }),
     connectionId: text("connection_id").notNull(),
     userName: text("user_name").notNull(),
-    trigger: text("trigger").$type<"schedule" | "manual" | "discover">().notNull(),
+    trigger: text("trigger").$type<"schedule" | "manual" | "discover" | "train">().notNull(),
     /** nothing was written to Sure; `created` counts would-be writes */
     dryRun: integer("dry_run", { mode: "boolean" }).notNull().default(false),
     status: text("status").$type<RunStatus>().notNull(),
