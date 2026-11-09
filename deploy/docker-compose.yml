@@ -1,0 +1,31 @@
+# sure-bank-sync using the published image. Quick start: see the README.
+services:
+  sure-bank-sync:
+    # Pin a version (e.g. :0.2.0) if you prefer updating on your own schedule.
+    image: ghcr.io/taaqif/sure-bank-sync:latest
+    container_name: sure-bank-sync
+    restart: unless-stopped
+    ports:
+      # Host port : the app's port inside the container
+      - "${HOST_PORT:-8686}:${SURE_SYNC_PORT:-8686}"
+    env_file: .env
+    environment:
+      TZ: ${TZ:-Australia/Melbourne}
+    volumes:
+      - data:/data
+    # Chromium needs more shared memory than Docker's 64MB default
+    shm_size: "1gb"
+    # Docker keeps its own copy of stdout; cap it (the app log is capped separately)
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+    # Lets the Sure URL setting use http://host.docker.internal:<port> when Sure runs on the host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  data:
+    # Fixed name: settings, encrypted logins and the synced record. Back it up.
+    name: sure-bank-sync-data

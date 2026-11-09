@@ -46,29 +46,60 @@ flowchart LR
 - **Run pages** show the live log, and screenshots and page HTML when a run
   fails. Runs can be cancelled at any time.
 
-## Setup
+## Quick start
+
+Needs Docker with the compose plugin. Copy and paste:
 
 ```bash
-cp .env.example .env
-docker compose run --rm sure-bank-sync --generate-key   # paste into SURE_SYNC_SECRET_KEY
-# choose a login: SURE_SYNC_ADMIN_PASSWORD, or OIDC (see Configuration)
+# 1. Make a folder and download the compose file and settings template
+mkdir sure-bank-sync && cd sure-bank-sync
+curl -fsSL -o docker-compose.yml \
+  https://raw.githubusercontent.com/Taaqif/sure-bank-sync/main/deploy/docker-compose.yml
+curl -fsSL -o .env \
+  https://raw.githubusercontent.com/Taaqif/sure-bank-sync/main/.env.example
+
+# 2. Create the encryption key for saved logins
+KEY=$(docker run --rm ghcr.io/taaqif/sure-bank-sync:latest --generate-key)
+sed -i "s|^SURE_SYNC_SECRET_KEY=.*|SURE_SYNC_SECRET_KEY=$KEY|" .env
+
+# 3. Set a password for the web UI (user: admin)
+PASS=$(openssl rand -base64 18)
+sed -i "s|^SURE_SYNC_ADMIN_PASSWORD=.*|SURE_SYNC_ADMIN_PASSWORD=$PASS|" .env
+echo "Web UI login: admin / $PASS"
+
+# 4. Start it
 chmod 600 .env
-docker compose up -d --build
+docker compose up -d
 ```
 
-Open <http://localhost:8686> (sign in as `admin`, or with your OIDC provider)
-and follow the setup steps:
+Open `http://<your-server>:8686`, sign in, and follow the steps on the
+dashboard (the [first-time setup](#first-time-setup) below explains each one).
+
+**Back up `.env`** (it holds `SURE_SYNC_SECRET_KEY`) and the Docker volume
+`sure-bank-sync-data`. Without the key, saved logins can't be decrypted.
+
+To update: `docker compose pull && docker compose up -d`. To use Pocket ID or
+another OIDC provider instead of a password, or to run behind Caddy or
+Traefik, see [Configuration](#configuration) and
+[docs/self-hosting.md](docs/self-hosting.md).
+
+### First-time setup
 
 1. **Settings** → Sure URL (as seen from the container, e.g.
-   `http://host.docker.internal:3000` if Sure runs on the host, or its
+   `http://host.docker.internal:3000` if Sure runs on the same host, or its
    service name if you join Sure's compose network).
 2. **Household** → add each person with a Sure API key (Sure → Settings →
    API Keys, read/write).
-3. **Add connection** → pick bank and enter login → **Run now** → map the
-   discovered accounts → **Run now** again.
+3. **Add connection** → pick the bank and enter the login → **Discover
+   accounts** → map each bank account to a Sure account → **Run now**.
 
-**Back up `SURE_SYNC_SECRET_KEY`.** Without it the saved logins in `/data`
-can't be decrypted and must be re-entered.
+### Building from source
+
+```bash
+git clone https://github.com/Taaqif/sure-bank-sync.git && cd sure-bank-sync
+cp .env.example .env    # set SURE_SYNC_SECRET_KEY and a login
+docker compose up -d --build
+```
 
 ## Configuration
 
