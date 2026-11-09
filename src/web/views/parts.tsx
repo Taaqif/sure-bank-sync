@@ -1,4 +1,4 @@
-import type { Run } from "../../db/schema.js";
+import type { RunsPage } from "../../runs.js";
 import type { CredentialField } from "../../providers/index.js";
 
 export function ago(iso: string | null | undefined, now = Date.now()): string {
@@ -28,8 +28,10 @@ export const Badge = (p: { status: string; label?: string }) => (
   <span class={`badge ${p.status}`}>{p.label ?? STATUS_LABEL[p.status] ?? p.status}</span>
 );
 
-export function RunsTable({ runs }: { runs: Run[] }) {
+/** Runs table with Newer/Older links; `href(n)` builds the link to page n. */
+export function RunsTable({ runs, page, pages, total, href }: RunsPage & { href: (page: number) => string }) {
   return (
+    <>
     <div class="card">
       <table>
         <tr>
@@ -60,6 +62,16 @@ export function RunsTable({ runs }: { runs: Run[] }) {
         ))}
       </table>
     </div>
+    {pages > 1 && (
+      <div class="pager">
+        {page > 1 ? <a href={href(page - 1)}>← Newer</a> : <span class="muted">← Newer</span>}
+        <span class="muted">
+          Page {page} of {pages} · {total} runs
+        </span>
+        {page < pages ? <a href={href(page + 1)}>Older →</a> : <span class="muted">Older →</span>}
+      </div>
+    )}
+    </>
   );
 }
 

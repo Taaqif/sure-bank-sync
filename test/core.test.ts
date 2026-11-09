@@ -243,6 +243,20 @@ describe("retention", () => {
   });
 });
 
+describe("runs paging", () => {
+  it("pages newest first and clamps the page number", () => {
+    const { runs } = setup();
+    for (let i = 0; i < 32; i++) runs.start(i % 2 ? "alice-anz" : "bob-amex", "x", "manual");
+    const p1 = runs.page(undefined, 1);
+    expect(p1).toMatchObject({ page: 1, pages: 3, total: 32 });
+    expect(p1.runs.map((r) => r.id).slice(0, 2)).toEqual([32, 31]);
+    expect(runs.page(undefined, 3).runs).toHaveLength(2);
+    expect(runs.page(undefined, 99).page).toBe(3);
+    expect(runs.page(undefined, -1).page).toBe(1);
+    expect(runs.page("alice-anz", 1).total).toBe(16);
+  });
+});
+
 describe("anz helpers", async () => {
   const { accountIdFromTile, daysBetween } = await import("../src/providers/anz.js");
   it("normalises tile account numbers", () => {

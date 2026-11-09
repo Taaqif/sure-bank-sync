@@ -12,6 +12,16 @@ export interface RunStats {
 
 export const emptyStats = (): RunStats => ({ fetched: 0, created: 0, skipped: 0, unmapped: 0 });
 
+export const RUNS_PAGE_SIZE = 15;
+
+export interface RunsPage {
+  runs: Run[];
+  /** 1-based */
+  page: number;
+  pages: number;
+  total: number;
+}
+
 export class RunStore {
   constructor(readonly db: Db) {
     // Runs left open by a crash/restart can never finish.
@@ -58,9 +68,22 @@ export class RunStore {
     return this.db.select().from(runs).where(eq(runs.id, id)).get();
   }
 
-  recent(connectionId?: string, limit = 50): Run[] {
+  recent(connectionId?: string, limit = 50, offset = 0): Run[] {
     const q = this.db.select().from(runs);
-    return (connectionId ? q.where(eq(runs.connectionId, connectionId)) : q).orderBy(desc(runs.id)).limit(limit).all();
+    return (connectionId ? q.where(eq(runs.connectionId, connectionId)) : q).orderBy(desc(runs.id)).limit(limit).offset(offset).all();
+  }
+
+  count(connectionId?: string): number {
+    const q = this.db.select({ n: sql<number>`count(*)` }).from(runs);
+    return (connectionId ? q.where(eq(runs.connectionId, connectionId)) : q).get()?.n ?? 0;
+  }
+
+  /** One page (1-based) of runs, newest first. */
+  page(connectionId: string | undefined, page: number, size = RUNS_PAGE_SIZE): RunsPage {
+    const total = this.count(connectionId);
+    const pages = Math.max(1, Math.ceil(total / size));
+    const current = Math.min(Math.max(1, Math.floor(page) || 1), pages);
+    return { runs: this.recent(connectionId, size, (current - 1) * size), page: current, pages, total };
   }
 
   last(connectionId: string): Run | undefined {

@@ -1,4 +1,5 @@
 import type { BankAccountRow, Run } from "../../db/schema.js";
+import type { RunsPage } from "../../runs.js";
 import type { MfaRequest } from "../../mfa.js";
 import type { ProviderDefinition } from "../../providers/index.js";
 import type { Connection, Settings, User } from "../../store.js";
@@ -25,7 +26,7 @@ export interface ConnectionRow {
 
 export interface DashboardProps {
   rows: ConnectionRow[];
-  runs: Run[];
+  runs: RunsPage;
   settings: Settings;
   hasUsers: boolean;
 }
@@ -46,13 +47,6 @@ export const LiveBadge = (p: { id?: string; title?: string; hidden?: boolean }) 
   </span>
 );
 
-/** "18:35:30 amex: opening Recent Transactions" -> "amex: opening Recent Transactions" */
-function currentStep(log: string | undefined): string {
-  const line = (log ?? "").trimEnd().split("\n").at(-1) ?? "";
-  const text = line.replace(/^\d{1,2}:\d{2}:\d{2}\s+/, "");
-  return text.length > 70 ? `${text.slice(0, 69)}…` : text;
-}
-
 /** Live state for the dashboard script: needs_you / running / idle. */
 const rowState = (r: ConnectionRow) => (r.mfa ? "needs_you" : r.running ? "running" : "idle");
 
@@ -65,14 +59,10 @@ function StatusCell({ r }: { r: ConnectionRow }) {
     );
   }
   if (r.running) {
-    const step = r.last?.status === "running" ? currentStep(r.last.log) : "";
     return (
-      <>
-        <a href={r.last ? `/runs/${r.last.id}` : "#"}>
-          <Badge status="running" label="running…" />
-        </a>
-        {step && <div class="step">{step}</div>}
-      </>
+      <a href={r.last ? `/runs/${r.last.id}` : "#"}>
+        <Badge status="running" label="running…" />
+      </a>
     );
   }
   if (!r.conn.enabled && !r.last) return <Badge status="disabled" />;
@@ -179,11 +169,11 @@ export function DashboardStatus(p: DashboardProps) {
         )}
       </div>
 
-      <h2>
+      <h2 id="recent-runs">
         Recent runs
         <LiveBadge />
       </h2>
-      <RunsTable runs={p.runs} />
+      <RunsTable {...p.runs} href={(n) => (n > 1 ? `/?runs=${n}#recent-runs` : "/#recent-runs")} />
     </>
   );
 }
@@ -236,7 +226,7 @@ async function refreshStatus() {
   const typing = [...el.querySelectorAll("input")].some(i => i.value || i === document.activeElement);
   if (!typing) {
     try {
-      const r = await fetch("/partials/status", { credentials: "same-origin" });
+      const r = await fetch("/partials/status" + location.search, { credentials: "same-origin" });
       if (r.ok) { el.innerHTML = await r.text(); diff(snapshot()); }
     } catch {}
   }
@@ -558,7 +548,7 @@ export const ConnectionPage = (p: {
   accounts: BankAccountRow[];
   sureAccounts: SureAccount[];
   sureError?: string;
-  runs: Run[];
+  runs: RunsPage;
   running: boolean;
   settings: Settings;
   msg?: string;
@@ -632,8 +622,8 @@ export const ConnectionPage = (p: {
         )}
       </div>
 
-      <h2>Runs</h2>
-      <RunsTable runs={p.runs} />
+      <h2 id="runs">Runs</h2>
+      <RunsTable {...p.runs} href={(n) => `/connections/${encodeURIComponent(p.conn.id)}${n > 1 ? `?runs=${n}` : ""}#runs`} />
 
       <h2>Edit connection</h2>
       <div class="card">

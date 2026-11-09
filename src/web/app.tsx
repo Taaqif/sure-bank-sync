@@ -214,16 +214,17 @@ export function createApp(svc: Services) {
     }));
   }
 
-  const dashboard = (): DashboardProps => ({
+  const runsPage = (c: Context) => Number(c.req.query("runs")) || 1;
+  const dashboard = (c: Context): DashboardProps => ({
     rows: connectionRows(),
-    runs: runs.recent(undefined, 15),
+    runs: runs.page(undefined, runsPage(c)),
     settings: store.settings(),
     hasUsers: store.users().length > 0,
   });
 
   // --- status ---------------------------------------------------------------
-  app.get("/", (c) => page(c, <DashboardPage {...dashboard()} msg={msgOf(c)} />));
-  app.get("/partials/status", (c) => page(c, <DashboardStatus {...dashboard()} />));
+  app.get("/", (c) => page(c, <DashboardPage {...dashboard(c)} msg={msgOf(c)} />));
+  app.get("/partials/status", (c) => page(c, <DashboardStatus {...dashboard(c)} />));
 
   app.get("/api/status", (c) =>
     c.json(
@@ -461,7 +462,7 @@ export function createApp(svc: Services) {
         accounts={store.bankAccounts(conn.id)}
         sureAccounts={sureAccounts}
         sureError={sureError}
-        runs={runs.recent(conn.id, 50)}
+        runs={runs.page(conn.id, runsPage(c))}
         running={svc.runner.isRunning(conn.id)}
         settings={settings}
         msg={msgOf(c)}

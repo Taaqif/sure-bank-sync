@@ -85,7 +85,7 @@ button.link:hover { color: var(--fg); }
 .login form { display: grid; gap: 14px; }
 .login label { display: grid; gap: 4px; font-weight: 500; }
 .login button[type=submit] { padding: 9px 12px; margin-top: 4px; }
-.step { color: var(--muted); font-size: 12px; margin-top: 3px; white-space: normal; max-width: 260px; }
+.pager { display: flex; gap: 14px; align-items: center; justify-content: center; margin: 10px 0 0; font-size: 13px; }
 .mfa.attention { border-width: 2px; animation: attention 1.6s ease-in-out 3; }
 @keyframes attention { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn) 35%, transparent); } }
 .toasts { position: fixed; right: 16px; bottom: 16px; display: grid; gap: 8px; z-index: 10; max-width: min(420px, calc(100vw - 32px)); }
