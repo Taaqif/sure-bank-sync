@@ -1,0 +1,6 @@
+{
+  // Wrap prose at 80; tables and code can't be wrapped.
+  "MD013": { "line_length": 80, "tables": false, "code_blocks": false },
+  // Tables use "| a | b |" with "| --- |" delimiter rows.
+  "MD060": { "style": "compact" }
+}

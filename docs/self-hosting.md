@@ -9,7 +9,7 @@ environment variables (in `.env`); nothing is configured in the web UI.
 `SURE_SYNC_AUTH` picks how people sign in:
 
 | Mode | When to use | Needs |
-|---|---|---|
+| --- | --- | --- |
 | `oidc` | You run an identity provider (Pocket ID, Authelia, Authentik, Keycloak, Zitadel, Kanidm…) or use Google / Microsoft. Each person signs in as themselves. | `SURE_SYNC_OIDC_ISSUER`, `SURE_SYNC_OIDC_CLIENT_ID` (and usually a secret) |
 | `password` | One shared admin login. | `SURE_SYNC_ADMIN_PASSWORD` (user `admin`, or `SURE_SYNC_ADMIN_USER`) |
 | `none` | Your reverse proxy already requires a login (Authelia/Authentik forward auth, Tailscale, Cloudflare Access…), or a network only you can reach. | nothing |
@@ -55,7 +55,7 @@ userinfo endpoint.
 Issuer URLs for common providers:
 
 | Provider | Issuer | Notes |
-|---|---|---|
+| --- | --- | --- |
 | Pocket ID | `https://id.example.com` | Add the client under OIDC Clients; for groups, assign user groups to the client and add the `groups` scope. Public clients work (no secret). |
 | Authelia | `https://auth.example.com` | Add a client under `identity_providers.oidc.clients` with `redirect_uris` above, `scopes: [openid, email, profile, groups]`. |
 | Authentik | `https://authentik.example.com/application/o/<slug>/` | Create an OAuth2/OpenID provider + application; the trailing slash matters. |
@@ -94,7 +94,7 @@ them through as-is; nginx needs buffering off (the app also sends
 
 ```caddyfile
 sync.example.com {
-	reverse_proxy sure-bank-sync:8686
+    reverse_proxy sure-bank-sync:8686
 }
 ```
 
@@ -103,11 +103,11 @@ Authelia:
 
 ```caddyfile
 sync.example.com {
-	forward_auth authelia:9091 {
-		uri /api/authz/forward-auth
-		copy_headers Remote-User Remote-Groups Remote-Email Remote-Name
-	}
-	reverse_proxy sure-bank-sync:8686
+    forward_auth authelia:9091 {
+        uri /api/authz/forward-auth
+        copy_headers Remote-User Remote-Groups Remote-Email Remote-Name
+    }
+    reverse_proxy sure-bank-sync:8686
 }
 ```
 
@@ -168,6 +168,7 @@ server {
 ## Checklist
 
 - HTTPS in front of the app, and `SURE_SYNC_PUBLIC_URL` set to that address.
-- A login: `oidc` with an allow list, `password`, or `none` only behind forward auth.
+- A login: `oidc` with an allow list, `password`, or `none` only behind
+  forward auth.
 - `SURE_SYNC_TRUST_PROXY=1` only when the proxy is the only way in.
 - Back up `.env` (`SURE_SYNC_SECRET_KEY`) and the `sure-bank-sync-data` volume.

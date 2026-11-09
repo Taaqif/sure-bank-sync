@@ -24,6 +24,8 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run typecheck
       - run: npm test
+      - name: Lint Markdown
+        run: npx -y markdownlint-cli2 "**/*.md" "#node_modules"
 
   image:
     # Publish the Docker image to GitHub Container Registry for release tags (v1.2.3).

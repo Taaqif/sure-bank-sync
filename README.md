@@ -56,7 +56,8 @@ chmod 600 .env
 docker compose up -d --build
 ```
 
-Open http://localhost:8686 (sign in as `admin`, or with your OIDC provider) and follow the setup steps:
+Open <http://localhost:8686> (sign in as `admin`, or with your OIDC provider)
+and follow the setup steps:
 
 1. **Settings** → Sure URL (as seen from the container, e.g.
    `http://host.docker.internal:3000` if Sure runs on the host, or its
@@ -76,7 +77,7 @@ required; everything else (Sure URL, household, banks, schedules) is set in
 the web UI.
 
 | Variable | Default | What |
-|---|---|---|
+| --- | --- | --- |
 | `SURE_SYNC_SECRET_KEY` | (required) | Encrypts saved logins and API keys. Generate with `--generate-key`; back it up. |
 | **Login** | | |
 | `SURE_SYNC_AUTH` | see below | `password`, `oidc` or `none`. Unset: `password` if a password is set, else `oidc` if an issuer is set, else `none`. |
@@ -128,10 +129,11 @@ examples: [docs/self-hosting.md](docs/self-hosting.md).
 Normal runs use Chrome with a real window on an invisible virtual screen
 (Xvfb, included in the Docker image), because Amex blocks windowless
 (headless) Chrome. If Xvfb is missing the app falls back to headless and says
-so in the run log; `SURE_SYNC_HEADLESS=1` forces headless. Start the app with `SURE_SYNC_DEBUG=1` and
-each connection gets a **Debug run** button: a dry run with a visible, slowed
-down browser (needs a display, e.g. WSLg on Windows) that also saves the bank's
-JSON responses and downloaded files to the run's debug folder.
+so in the run log; `SURE_SYNC_HEADLESS=1` forces headless. Start the app with
+`SURE_SYNC_DEBUG=1` and each connection gets a **Debug run** button: a dry run
+with a visible, slowed down browser (needs a display, e.g. WSLg on Windows)
+that also saves the bank's JSON responses and downloaded files to the run's
+debug folder.
 
 ```bash
 SURE_SYNC_DEBUG=1 SURE_SYNC_PORT=8687 npm run dev
@@ -217,7 +219,7 @@ new file in `drizzle/`. Migrations apply automatically on start.
 ### Layout
 
 | Path | What |
-|---|---|
+| --- | --- |
 | `src/main.ts` | entry point, env, CLI flags |
 | `src/store.ts` | config (settings, people, connections, account mappings) |
 | `src/runs.ts` | run history, synced-transaction record |
