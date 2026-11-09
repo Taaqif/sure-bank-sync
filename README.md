@@ -204,8 +204,9 @@ CAPTCHAs, "not a robot" checks and unknown login screens are handed to a
 person: every page shows an orange **Needs you in the browser** banner, and
 **Open browser view** streams the bank's page so you can click, type, paste
 and scroll (works on phones too). One-time codes are typed into the code box
-on the dashboard. The run carries on once the step is done. Nothing solves
-these checks automatically.
+on the dashboard. The run carries on once the step is done. If the page gets
+stuck, **Retry** starts the login again from the bank's login page (up to 5
+times per run). Nothing solves these checks automatically.
 
 Runs that log in often get checked more, so keep each connection's schedule
 to about once a day and don't clear saved browsers unless you need to.

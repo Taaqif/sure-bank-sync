@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { chromium, type BrowserContext, type Page } from "playwright";
 import { logger } from "./log.js";
 import { virtualDisplay } from "./display.js";
-import { MfaBroker, MfaTimeout } from "./mfa.js";
+import { MfaBroker, MfaTimeout, RETRY, RetryLogin } from "./mfa.js";
 import { startRecording } from "./recorder.js";
 import { RemoteHub } from "./remote.js";
 import { maskAccountId, type BankTransaction } from "./models.js";
@@ -529,7 +529,7 @@ export class Runner {
             })()
           : Promise.resolve();
         try {
-          await answered;
+          if ((await answered) === RETRY) throw new RetryLogin("retry pressed in the browser view");
         } finally {
           waiting = false;
           await watch;
@@ -546,7 +546,7 @@ export class Runner {
         await this.#train(flags.train, conn, def, provider, ctx, rlog, settings.verboseLogs);
         return [];
       }
-      await provider.login();
+      await withRetry(() => provider.login(), rlog);
       rlog("logged in");
       if (provider.listAccounts) {
         const accounts = await provider.listAccounts();
@@ -592,7 +592,7 @@ export class Runner {
   ): Promise<void> {
     const browser = ctx.browser;
     if (train.login) {
-      await provider.login();
+      await withRetry(() => provider.login(), rlog);
       rlog("logged in; recording starts now");
     } else {
       if (!def.startUrl) throw new ProviderError(`${def.label} has no start page; tick "Log in first"`);
@@ -636,5 +636,20 @@ export class Runner {
       .sort((a, b) => Number(b.slice(4)) - Number(a.slice(4)))
       .slice(DEBUG_DIRS_KEPT);
     await Promise.all(old.map((d) => rm(join(root, d), { recursive: true, force: true })));
+  }
+}
+
+/** Retry presses allowed per run, so a stuck page can't loop forever. */
+const MAX_RETRIES = 5;
+
+/** Run the login again (from the bank's login page) each time a person presses Retry. */
+async function withRetry(login: () => Promise<void>, rlog: (m: string) => void): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await login();
+    } catch (e) {
+      if (!(e instanceof RetryLogin) || attempt > MAX_RETRIES) throw e;
+      rlog(`retrying the login (asked from the browser view, ${attempt} of ${MAX_RETRIES})`);
+    }
   }
 }

@@ -2,6 +2,11 @@
 
 export class MfaTimeout extends Error {}
 export class MfaCancelled extends Error {}
+/** A person pressed Retry in the browser view: start the login again. */
+export class RetryLogin extends Error {}
+
+/** What the browser view's Retry button submits. */
+export const RETRY = "\u0000retry";
 
 export interface MfaRequest {
   connectionId: string;

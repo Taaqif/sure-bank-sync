@@ -219,6 +219,34 @@ describe("web", () => {
     expect((await input({ type: "key", key: "a" })).status).toBe(404);
   }, 60_000);
 
+  it("starts the login again when Retry is pressed in the browser view", async () => {
+    const env = setup();
+    const { app, runner, mfa } = makeApp(env);
+    const id = env.store.saveConnection(null, {
+      userId: env.userId, provider: "demo", enabled: false, schedule: null, lookbackDays: null,
+      credentials: {}, options: { captcha: true },
+    });
+    const waitForBrowser = async () => {
+      for (let i = 0; i < 300 && mfa.get(id)?.kind !== "browser"; i++) await new Promise((r) => setTimeout(r, 50));
+      expect(mfa.get(id)?.kind).toBe("browser");
+    };
+    const done = runner.run(id, "manual", { discover: true });
+    await waitForBrowser();
+    expect(await (await get(app, `/connections/${id}/remote`)).text()).toContain("/remote/retry");
+
+    const r = await app.request(`/connections/${id}/remote/retry`, { method: "POST", headers: { Host: "localhost" } });
+    expect(r.status).toBe(303);
+    // the login runs again and asks for the browser check again
+    await waitForBrowser();
+    mfa.submit(id, "done");
+
+    const runId = await done;
+    const run = env.runs.get(runId)!;
+    expect(run.status).toBe("success");
+    expect(run.log).toContain("retrying the login (asked from the browser view, 1 of 5)");
+    expect(run.log.match(/waiting for you in the browser view/g)).toHaveLength(2);
+  }, 60_000);
+
   it("shows each bank's sync period choices, and a note for Amex", async () => {
     const env = setup();
     const { app } = makeApp(env);

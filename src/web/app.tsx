@@ -7,7 +7,7 @@ import { getConnInfo } from "@hono/node-server/conninfo";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { Child } from "hono/jsx";
 import { clearLogFile, logFileBytes, logger, tailLog } from "../log.js";
-import type { MfaBroker } from "../mfa.js";
+import { RETRY, type MfaBroker } from "../mfa.js";
 import { PROVIDERS, syncLabel } from "../providers/index.js";
 import { DEBUG_TOOLS, type Runner } from "../runner.js";
 import { RECIPE_RE, type Recording } from "../recorder.js";
@@ -818,6 +818,14 @@ export function createApp(svc: Services) {
     const id = c.req.param("id");
     if (svc.mfa.get(id)?.kind === "browser") svc.mfa.submit(id, "done");
     return redirect(c, `/connections/${id}`, "Run continued");
+  });
+
+  app.post("/connections/:id/remote/retry", (c) => {
+    const id = c.req.param("id");
+    if (svc.mfa.get(id)?.kind !== "browser") return redirect(c, `/connections/${id}`, "Error: nothing is waiting in the browser view");
+    svc.mfa.submit(id, RETRY);
+    // Stay in the browser view: it reopens when the bank needs a person again.
+    return c.redirect(`/connections/${id}/remote`, 303);
   });
 
   app.post("/connections/:id/mfa", async (c) => {

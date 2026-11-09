@@ -1396,6 +1396,11 @@ export const RemotePage = (p: { connectionId: string; prompt?: string; doneLabel
               {p.doneLabel ?? "Done"}
             </button>
           </form>
+          <form method="post" action={`/connections/${p.connectionId}/remote/retry`}>
+            <button type="submit" class="secondary" title="Start the login again from the bank's login page">
+              Retry
+            </button>
+          </form>
           <CancelButton connectionId={p.connectionId} />
         </div>
       )}
