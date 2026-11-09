@@ -114,7 +114,7 @@ table.storage tr.total td { font-weight: 600; }
 .cta { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin: 0 0 14px; padding: 12px 16px; border: 2px solid var(--warn); border-radius: 10px; background: color-mix(in srgb, var(--warn) 12%, var(--card)); animation: attention 1.6s ease-in-out 3; }
 .cta strong { color: var(--warn); }
 .cta small { display: block; color: var(--fg); margin-top: 2px; }
-.cta-btn { display: inline-block; padding: 9px 16px; border-radius: 8px; background: var(--warn); color: #fff; font-weight: 700; text-decoration: none; white-space: nowrap; }
+.cta-btn { display: inline-block; padding: 9px 16px; border-radius: 8px; background: var(--warn); color: var(--bg); font-weight: 700; text-decoration: none; white-space: nowrap; }
 .cta-btn:hover { filter: brightness(1.1); }
 .needs:not(:empty) { border: 1px solid var(--warn); border-radius: 8px; padding: 10px 14px; margin: 8px 0; background: var(--card); }
 .live { display: inline-flex; align-items: center; gap: 5px; margin-left: 8px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--run); color: var(--run); font-size: 10px; font-weight: 700; letter-spacing: .06em; vertical-align: middle; }
