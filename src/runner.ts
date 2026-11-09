@@ -6,7 +6,7 @@ import { logger } from "./log.js";
 import { virtualDisplay } from "./display.js";
 import { MfaBroker } from "./mfa.js";
 import { RemoteHub } from "./remote.js";
-import type { BankTransaction } from "./models.js";
+import { maskAccountId, type BankTransaction } from "./models.js";
 import { PROVIDERS, syncDays, ProviderError, snapshot, type DateRange, type ProviderContext } from "./providers/index.js";
 import { pushTransactions } from "./push.js";
 import { emptyStats, type RunStore } from "./runs.js";
@@ -196,6 +196,11 @@ export class Runner {
     maxConcurrent = 2,
   ) {
     this.#browsers = new Semaphore(maxConcurrent);
+  }
+
+  /** Is any run in progress? */
+  anyRunning(): boolean {
+    return this.#active.size > 0;
   }
 
   isRunning(connectionId: string): boolean {
@@ -421,7 +426,8 @@ export class Runner {
       if (provider.listAccounts) {
         const accounts = await provider.listAccounts();
         this.store.recordBankAccounts(conn.id, accounts);
-        rlog(`found ${accounts.length} accounts: ${accounts.map((a) => `${a.name} (${a.id})`).join(", ")}`);
+        const id = (a: { id: string }) => (settings.verboseLogs ? a.id : maskAccountId(a.id));
+        rlog(`found ${accounts.length} accounts: ${accounts.map((a) => `${a.name} (${id(a)})`).join(", ")}`);
       } else if (discover) {
         throw new ProviderError(`${conn.provider} can't list accounts; do a dry run instead to find them`);
       }

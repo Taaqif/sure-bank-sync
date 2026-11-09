@@ -2,7 +2,7 @@
  * Map scraped transactions to Sure accounts, drop what's already synced, and
  * send the rest to Sure as one CSV import per Sure account.
  */
-import { assignExternalIds, formatCents, type BankAccount, type BankTransaction, type IdentifiedTransaction } from "./models.js";
+import { assignExternalIds, formatCents, maskAccountId, type BankAccount, type BankTransaction, type IdentifiedTransaction } from "./models.js";
 import type { RunStats, RunStore } from "./runs.js";
 import type { ConfigStore, Connection, Settings } from "./store.js";
 import { SureClient, SureError, toImportCsv, type SureImport } from "./sureClient.js";
@@ -52,7 +52,7 @@ export async function pushTransactions(
     else if (a?.sureAccountId) mapped.push([a.sureAccountId, t]);
     else {
       stats.unmapped++;
-      unmappedNames.add(`${t.account.name} (${t.account.id})`);
+      unmappedNames.add(`${t.account.name} (${settings.verboseLogs ? t.account.id : maskAccountId(t.account.id)})`);
     }
   }
   for (const name of [...unmappedNames].sort()) {
@@ -84,14 +84,18 @@ export async function pushTransactions(
     for (const [accountId, n] of groups) {
       log(`[dry run] would import ${n} transactions into ${names.get(accountId) ?? accountId} as one CSV import (nothing written)`);
     }
+    // Individual transactions only with verbose logs on (they're personal data).
     for (const [accountId, t] of todo) {
-      const nature = t.amountCents > 0 ? "income " : "expense";
-      log(
-        `[dry run] would import ${t.date} ${nature} ${formatCents(Math.abs(t.amountCents)).padStart(10)} ` +
-          `${t.description} → ${names.get(accountId) ?? accountId}`,
-      );
+      if (settings.verboseLogs) {
+        const nature = t.amountCents > 0 ? "income " : "expense";
+        log(
+          `[dry run] would import ${t.date} ${nature} ${formatCents(Math.abs(t.amountCents)).padStart(10)} ` +
+            `${t.description} → ${names.get(accountId) ?? accountId}`,
+        );
+      }
       stats.created++;
     }
+    if (!settings.verboseLogs) log("[dry run] turn on verbose logs in Settings to list each transaction");
     return;
   }
 

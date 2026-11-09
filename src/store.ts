@@ -51,6 +51,8 @@ export const SettingsSchema = z.object({
   dryRun: z.boolean(),
   /** save the browser's network log with failed runs' debug files (debug runs always do) */
   saveNetworkLog: z.boolean(),
+  /** logs may include transaction details and full account numbers */
+  verboseLogs: z.boolean(),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
@@ -63,6 +65,7 @@ export const DEFAULT_SETTINGS: Settings = {
   mfaTimeoutSeconds: 300,
   dryRun: false,
   saveNetworkLog: false,
+  verboseLogs: false,
 };
 
 export interface User {

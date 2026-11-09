@@ -1,4 +1,4 @@
-import { readFile, readdir, rm } from "node:fs/promises";
+import { readFile, readdir, rm, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { Hono, type Context } from "hono";
@@ -241,7 +241,34 @@ export function createApp(svc: Services) {
   });
 
   // --- settings -------------------------------------------------------------
-  app.get("/settings", (c) => page(c, <SettingsPage s={store.settings()} msg={msgOf(c)} />));
+  /** Saved browser profiles (one per connection) and their size on disk. */
+  async function browserData(): Promise<{ profiles: number; bytes: number }> {
+    const root = join(svc.dataDir, "browser");
+    const dirs = await readdir(root).catch(() => [] as string[]);
+    let bytes = 0;
+    const walk = async (p: string): Promise<void> => {
+      for (const e of await readdir(p, { withFileTypes: true }).catch(() => [])) {
+        const full = join(p, e.name);
+        if (e.isDirectory()) await walk(full);
+        else if (e.isFile()) bytes += (await stat(full).catch(() => ({ size: 0 }))).size;
+      }
+    };
+    await walk(root);
+    return { profiles: dirs.length, bytes };
+  }
+
+  app.get("/settings", async (c) =>
+    page(c, <SettingsPage s={store.settings()} browserData={await browserData()} msg={msgOf(c)} />),
+  );
+
+  // Forget every saved browser: cookies, sessions and remembered devices for all connections.
+  app.post("/settings/clear-browsers", async (c) => {
+    if (svc.runner.anyRunning()) return redirect(c, "/settings", "Error: stop the runs in progress first");
+    const { profiles } = await browserData();
+    await rm(join(svc.dataDir, "browser"), { recursive: true, force: true });
+    log.info(`cleared ${profiles} browser profiles`);
+    return redirect(c, "/settings", `Cleared ${profiles} saved browser${profiles === 1 ? "" : "s"}`);
+  });
 
   app.post("/settings", async (c) => {
     const b = await c.req.parseBody();
@@ -254,13 +281,14 @@ export function createApp(svc: Services) {
       mfaTimeoutSeconds: str(b, "mfaTimeoutSeconds"),
       dryRun: b.dryRun === "on",
       saveNetworkLog: b.saveNetworkLog === "on",
+      verboseLogs: b.verboseLogs === "on",
     };
     try {
       store.saveSettings(input);
     } catch (e) {
       if (!(e instanceof ValidationError)) throw e;
       const shown = { ...store.settings(), ...input, mfaTimeoutSeconds: Number(input.mfaTimeoutSeconds) };
-      return page(c, <SettingsPage s={shown} error={e.message} />, 400);
+      return page(c, <SettingsPage s={shown} browserData={await browserData()} error={e.message} />, 400);
     }
     svc.scheduler.reload();
     return redirect(c, "/settings", "Settings saved");

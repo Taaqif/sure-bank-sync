@@ -207,8 +207,18 @@ describe("dry run", () => {
     env.store.setMapping(conn.id, ACCT.id, "acct-1", false);
     const lines: string[] = [];
 
+    // Default: counts only, no transaction details or full account numbers.
     let s = emptyStats();
     await pushTransactions(deps, conn, env.store.settings(), [txn(), txn("SALARY", 250000)], s, (m) => lines.push(m), true);
+    expect(s.created).toBe(2);
+    expect(lines.join("\n")).not.toContain("SALARY");
+    expect(lines.some((l) => l.includes("would import 2 transactions into Joint Everyday"))).toBe(true);
+
+    // Verbose logs list each transaction.
+    lines.length = 0;
+    s = emptyStats();
+    const verbose = { ...env.store.settings(), verboseLogs: true };
+    await pushTransactions(deps, conn, verbose, [txn(), txn("SALARY", 250000)], s, (m) => lines.push(m), true);
     expect(s.created).toBe(2);
     expect(sure.calls.every((c) => c.method === "GET")).toBe(true);
     expect(lines.some((l) => l.includes("would import 2026-11-01 income     2500.00 SALARY → Joint Everyday"))).toBe(true);
@@ -383,5 +393,14 @@ describe("sync period", async () => {
     expect(syncDays({ provider: "anz", lookbackDays: 60 })).toBe(60);
     expect(syncLabel({ provider: "anz", lookbackDays: 30 })).toBe("last 30 days");
     expect(syncLabel({ provider: "amex", lookbackDays: 60 })).toBe("current statement");
+  });
+});
+
+describe("log masking", async () => {
+  const { maskAccountId } = await import("../src/models.js");
+  it("keeps only the last 4 digits of account numbers", () => {
+    expect(maskAccountId("012345 987654321")).toBe("••4321");
+    expect(maskAccountId("amex-21002")).toBe("••1002");
+    expect(maskAccountId("amex")).toBe("amex");
   });
 });

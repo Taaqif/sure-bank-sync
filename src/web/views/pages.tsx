@@ -268,7 +268,9 @@ export const DashboardPage = (p: DashboardProps & { msg?: string }) => (
 
 // --- settings --------------------------------------------------------------
 
-export const SettingsPage = (p: { s: Settings; msg?: string; error?: string }) => (
+const mb = (bytes: number) => (bytes < 1e6 ? `${Math.max(1, Math.round(bytes / 1e3))} KB` : `${(bytes / 1e6).toFixed(1)} MB`);
+
+export const SettingsPage = (p: { s: Settings; browserData?: { profiles: number; bytes: number }; msg?: string; error?: string }) => (
   <Layout title="Settings" nav="settings" msg={p.msg} error={p.error} script={SCHEDULE_JS}>
     <h2>Settings</h2>
     <div class="card">
@@ -307,6 +309,13 @@ export const SettingsPage = (p: { s: Settings; msg?: string; error?: string }) =
           bank's page made (method, status, address without query string; no headers, cookies or bodies). Debug runs
           always include it.
         </small>
+        <label class="check">
+          <input type="checkbox" name="verboseLogs" checked={p.s.verboseLogs} /> Verbose logs
+        </label>
+        <small class="hint" style="margin-top:-10px">
+          Off: logs show counts and only the last 4 digits of account numbers. On: also every transaction (date,
+          amount, description) and full account numbers. Turn on only while troubleshooting.
+        </small>
         <label>
           Source tag
           <input type="text" name="sureSource" value={p.s.sureSource} />
@@ -314,6 +323,33 @@ export const SettingsPage = (p: { s: Settings; msg?: string; error?: string }) =
         </label>
         <div>
           <button type="submit">Save</button>
+        </div>
+      </form>
+    </div>
+
+    <h2>Browser data</h2>
+    <div class="card">
+      <form
+        class="stack"
+        method="post"
+        action="/settings/clear-browsers"
+        onsubmit="return confirm('Delete every saved browser? All connections are logged out and banks will treat the next login as a new device (expect identity checks).')"
+      >
+        <p style="margin:0">
+          Each connection keeps its own browser (cookies, sessions, remembered devices).{" "}
+          {p.browserData && (
+            <span class="muted">
+              {p.browserData.profiles} saved browser{p.browserData.profiles === 1 ? "" : "s"}
+              {p.browserData.profiles > 0 && `, ${mb(p.browserData.bytes)}`}.
+            </span>
+          )}
+        </p>
+        <small class="hint">
+          Clearing them logs every connection out. Banks then treat the next login as a new device, so expect
+          identity checks or a CAPTCHA. Saved passwords and settings are kept.
+        </small>
+        <div>
+          <button type="submit" class="danger">Clear all browser data</button>
         </div>
       </form>
     </div>

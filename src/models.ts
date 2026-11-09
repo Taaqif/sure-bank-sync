@@ -72,3 +72,12 @@ export function parseAmount(text: string): number {
   const cents = Number(m[1]) * 100 + Number((m[2] ?? "0").padEnd(2, "0"));
   return negative ? -cents : cents;
 }
+
+/**
+ * Account number for logs: last 4 digits only ("012345 987654321" -> "••4321").
+ * Ids without digits (e.g. "amex") are returned as-is.
+ */
+export function maskAccountId(id: string): string {
+  const digits = id.replace(/\D/g, "");
+  return digits.length > 4 ? `••${digits.slice(-4)}` : id;
+}

@@ -257,4 +257,16 @@ describe("web", () => {
     expect(done).toMatchObject({ finished: true, stats: "fetched 3 · new 2 · already synced 1 · unmapped 0" });
     expect(await (await get(app, `/runs/${id}`)).text()).not.toContain(`class="live"`);
   });
+
+  it("clears all saved browsers from settings", async () => {
+    const env = setup();
+    const { app } = makeApp(env);
+    const profile = join(env.dir, "browser", "alice-anz");
+    mkdirSync(profile, { recursive: true });
+    writeFileSync(join(profile, "Cookies"), "x".repeat(2000));
+    expect(await (await get(app, "/settings")).text()).toContain("1 saved browser, 2 KB");
+    const r = await app.request("/settings/clear-browsers", form({}));
+    expect(r.headers.get("location")).toContain("Cleared%201%20saved%20browser");
+    expect(existsSync(profile)).toBe(false);
+  });
 });

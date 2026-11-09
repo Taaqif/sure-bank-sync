@@ -53,6 +53,11 @@ cron (per connection) → Playwright logs into bank → fetch transactions
   connection or run page.
 - **Remembered device**: each connection keeps its own browser profile in
   `/data/browser/<id>`, so banks ask for MFA less often.
+  Settings → **Clear all browser data** deletes them all (every connection is
+  logged out; expect identity checks on the next login).
+- **Private by default**: logs show counts and only the last 4 digits of
+  account numbers. Settings → **Verbose logs** adds every transaction and full
+  account numbers, for troubleshooting.
 - **Debugging**: failed runs save a screenshot + HTML of the page, viewable
   from the run page.
 
