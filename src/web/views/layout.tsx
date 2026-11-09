@@ -128,6 +128,7 @@ table.storage tr.total td { font-weight: 600; }
 .screen { touch-action: none; -webkit-user-select: none; user-select: none; }
 .remote-tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 0 0 10px; }
 .rkeys { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+.screen.typing { outline: 2px solid var(--run); outline-offset: 2px; }
 @media (max-width: 700px) {
   #remote .mfa { font-size: 14px; }
   .rlog { font-size: 10.5px; max-height: 200px; }
