@@ -252,7 +252,7 @@ describe("web", () => {
     const runId = await done;
     const run = env.runs.get(runId)!;
     expect(run.status).toBe("success");
-    expect(run.log).toContain("retrying the login (asked from the browser view, 1 of 5)");
+    expect(run.log).toContain("retrying the login: retry pressed in the browser view (1 of 5)");
     expect(run.log.match(/waiting for you in the browser view/g)).toHaveLength(2);
   }, 60_000);
 

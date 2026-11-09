@@ -642,14 +642,14 @@ export class Runner {
 /** Retry presses allowed per run, so a stuck page can't loop forever. */
 const MAX_RETRIES = 5;
 
-/** Run the login again (from the bank's login page) each time a person presses Retry. */
+/** Run the login again (from the bank's login page) when a person presses Retry or a provider asks to start over. */
 async function withRetry(login: () => Promise<void>, rlog: (m: string) => void): Promise<void> {
   for (let attempt = 1; ; attempt++) {
     try {
       return await login();
     } catch (e) {
       if (!(e instanceof RetryLogin) || attempt > MAX_RETRIES) throw e;
-      rlog(`retrying the login (asked from the browser view, ${attempt} of ${MAX_RETRIES})`);
+      rlog(`retrying the login: ${(e as Error).message} (${attempt} of ${MAX_RETRIES})`);
     }
   }
 }

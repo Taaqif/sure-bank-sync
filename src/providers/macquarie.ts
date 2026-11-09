@@ -18,6 +18,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseAmount, type BankAccount, type BankTransaction } from "../models.js";
 import { bankDate, parseCsv } from "./csv.js";
+import { RetryLogin } from "../mfa.js";
 import { AuthError, ProviderError, captureJson, pause, settle, snapshot, type ProviderContext, type ProviderDefinition } from "./base.js";
 
 const LOGIN_URL = "https://online.macquarie.com.au/personal/";
@@ -55,6 +56,7 @@ const VERIFY_SUBMIT = /^\s*(verify|confirm|continue|submit|next)\s*$/i;
 const ERROR_TEXT = /(incorrect|invalid|doesn'?t match|not recognised).{0,40}(id|password|details)|account (is |has been )?(locked|suspended)|too many (failed )?attempts/i;
 const APP_APPROVAL_TEXT = /approve.{0,40}(app|notification|device|login|log in|sign ?in)|check your (phone|device|app)|sent a (notification|request)|waiting for (approval|you to approve)/i;
 /** Macquarie's own "Help us keep your account secure / I'm not a robot" check. */
+const ROBOT_FRAME = 'iframe#sec-cpt-if, iframe[src*="akamai-challenge"]';
 export const ROBOT_TEXT = /confirm you['’]?re not a robot|i['’]?m not a robot|help us keep your account secure/i;
 const CODE_TEXT = /(sms|text message|one[- ]time|verification|security) code|enter the code|code (we|that we) sent/i;
 
@@ -138,11 +140,13 @@ export const macquarie: ProviderDefinition = {
      * challenge), so check every frame's text and the challenge URL too.
      */
     async function robotShown(text?: string): Promise<boolean> {
-      if (/akamai_challenge/i.test(page.url())) return true;
+      if (/akamai[_-]challenge/i.test(page.url())) return true;
+      // Akamai's challenge iframe (#sec-cpt-if, /challenge/akamai-challenge.html)
+      if (await visible(page.locator(ROBOT_FRAME))) return true;
       if (ROBOT_TEXT.test(text ?? (await bodyText()))) return true;
       for (const frame of page.frames()) {
         if (frame === page.mainFrame()) continue;
-        if (/sec-cpt/i.test(frame.url())) return true;
+        if (/sec-cpt|akamai[_-]challenge/i.test(frame.url())) return true;
         const t = await frame.locator("body").innerText({ timeout: 1000 }).catch(() => "");
         if (ROBOT_TEXT.test(t)) return true;
       }
@@ -163,7 +167,8 @@ export const macquarie: ProviderDefinition = {
         const onForm = await visible(page.locator(SEL.password));
         if (!onForm && APP_APPROVAL_TEXT.test(text)) return "app";
         if (!onForm && CODE_TEXT.test(text)) return "code";
-        await pause(700, 1000);
+        // Check often: the robot check expires about 30 seconds after it appears.
+        await pause(250, 400);
       }
       return "unknown";
     }
@@ -353,10 +358,16 @@ export const macquarie: ProviderDefinition = {
             ctx.log("macquarie: \"I'm not a robot\" check shown");
             await ctx.requestBrowserHelp(
               page,
-              "Macquarie wants you to confirm you're not a robot. Tick the box (and solve any picture puzzle), then press Continue. The run continues once it's gone.",
+              "Macquarie wants you to confirm you're not a robot. Be quick: the check expires after about 30 seconds. Tick the box (and solve any picture puzzle), then press Continue. If it expires, the sync logs in again.",
               async () => (await loggedIn()) || !(await robotShown()),
             );
             await settle(page);
+            // The check expired (or was dismissed) and left us on the login form: start over.
+            const next = await state(10_000);
+            if (next === "unknown" && (await visible(page.locator(SEL.password).locator("visible=true")))) {
+              await snapshot(ctx, "robot-expired");
+              throw new RetryLogin("the robot check ended without logging in");
+            }
             continue;
           }
           if (s === "trust") {

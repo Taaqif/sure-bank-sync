@@ -228,6 +228,10 @@ const NEEDS_JS = `
   const box = document.getElementById("needs-browser");
   if (!box) return;
   let last = box.dataset.state || "";
+  // Mark the tab title too, so a tab in the background shows it.
+  const title = document.title;
+  const mark = (n) => { document.title = n ? "(" + n + ") Needs you · " + title : title; };
+  try { mark(JSON.parse(last || "[]").length); } catch {}
   async function poll() {
     try {
       const r = await fetch("/api/needs", { credentials: "same-origin" });
@@ -236,6 +240,7 @@ const NEEDS_JS = `
         const state = JSON.stringify(items);
         if (state !== last) {
           last = state;
+          mark(items.length);
           box.innerHTML = "";
           for (const n of items) {
             const div = document.createElement("div");
@@ -256,9 +261,10 @@ const NEEDS_JS = `
         }
       }
     } catch {}
-    setTimeout(poll, document.hidden ? 10000 : 3000);
+    // Quick: some checks (Macquarie's robot check) expire after about 30 seconds.
+    setTimeout(poll, document.hidden ? 3000 : 1500);
   }
-  setTimeout(poll, 3000);
+  setTimeout(poll, 1500);
 })();`;
 
 export function Layout(props: {
