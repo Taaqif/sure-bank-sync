@@ -59,8 +59,7 @@ curl -fsSL -o .env \
   https://raw.githubusercontent.com/Taaqif/sure-bank-sync/main/.env.example
 
 # 2. Create the encryption key for saved logins
-KEY=$(docker run --rm ghcr.io/taaqif/sure-bank-sync:latest --generate-key)
-sed -i "s|^SURE_SYNC_SECRET_KEY=.*|SURE_SYNC_SECRET_KEY=$KEY|" .env
+sed -i "s|^SURE_SYNC_SECRET_KEY=.*|SURE_SYNC_SECRET_KEY=$(openssl rand -hex 32)|" .env
 
 # 3. Set a password for the web UI (user: admin)
 PASS=$(openssl rand -base64 18)
@@ -109,7 +108,7 @@ the web UI.
 
 | Variable | Default | What |
 | --- | --- | --- |
-| `SURE_SYNC_SECRET_KEY` | (required) | Encrypts saved logins and API keys. Generate with `--generate-key`; back it up. |
+| `SURE_SYNC_SECRET_KEY` | (required) | Encrypts saved logins and API keys. Generate with `openssl rand -hex 32`; back it up. |
 | **Login** | | |
 | `SURE_SYNC_AUTH` | see below | `password`, `oidc` or `none`. Unset: `password` if a password is set, else `oidc` if an issuer is set, else `none`. |
 | `SURE_SYNC_ADMIN_USER` | `admin` | Password mode user name. |
@@ -229,7 +228,7 @@ fix one after a bank changes its site.
 ## CLI
 
 ```bash
-docker compose run --rm sure-bank-sync --generate-key
+docker compose run --rm sure-bank-sync --generate-key   # same as openssl rand -hex 32
 docker compose run --rm sure-bank-sync --run alice-anz   # one run, print log, exit
 ```
 

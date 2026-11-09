@@ -27,6 +27,15 @@ describe("crypto", () => {
     expect(() => new Crypto(generateKey()).decrypt(token)).toThrow(CryptoError);
     expect(() => new Crypto("short")).toThrow(CryptoError);
   });
+
+  it("accepts the key as hex or base64", () => {
+    const hex = generateKey();
+    expect(hex).toMatch(/^[0-9a-f]{64}$/);
+    const b64 = Buffer.from(hex, "hex").toString("base64");
+    // Same bytes either way: data saved with one opens with the other.
+    expect(new Crypto(b64).decrypt(new Crypto(hex).encrypt("pw"))).toBe("pw");
+    expect(() => new Crypto("ab".repeat(31))).toThrow(CryptoError);
+  });
 });
 
 describe("config store", () => {

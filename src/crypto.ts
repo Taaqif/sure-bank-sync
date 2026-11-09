@@ -6,17 +6,19 @@ export class CryptoError extends Error {}
 const PREFIX = "v1:";
 
 export function generateKey(): string {
-  return randomBytes(32).toString("base64");
+  return randomBytes(32).toString("hex");
 }
 
 export class Crypto {
   readonly #key: Buffer;
 
+  /** `key`: 32 random bytes as 64 hex characters (openssl rand -hex 32) or base64 (openssl rand -base64 32). */
   constructor(key: string) {
-    const buf = Buffer.from(key.trim(), "base64");
+    const k = key.trim();
+    const buf = /^[0-9a-f]{64}$/i.test(k) ? Buffer.from(k, "hex") : Buffer.from(k, "base64");
     if (buf.length !== 32) {
       throw new CryptoError(
-        "SURE_SYNC_SECRET_KEY must be 32 bytes, base64 encoded. Generate one with: npx sure-bank-sync --generate-key",
+        "SURE_SYNC_SECRET_KEY must be 32 random bytes as hex or base64. Generate one with: openssl rand -hex 32",
       );
     }
     this.#key = buf;
