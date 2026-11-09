@@ -41,7 +41,7 @@ export class RunStore {
       .run();
   }
 
-  finish(id: number, status: "success" | "failed", stats: RunStats, error: string | null = null): void {
+  finish(id: number, status: "success" | "failed" | "cancelled", stats: RunStats, error: string | null = null): void {
     this.db
       .update(runs)
       .set({ status, finishedAt: nowIso(), error, ...stats })

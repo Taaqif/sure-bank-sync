@@ -71,7 +71,10 @@ can't be decrypted and must be re-entered.
 
 ## Development: watching the browser
 
-Normal runs are always headless. Start the app with `SURE_SYNC_DEBUG=1` and
+Normal runs use Chrome with a real window on an invisible virtual screen
+(Xvfb, included in the Docker image), because Amex blocks windowless
+(headless) Chrome. If Xvfb is missing the app falls back to headless and says
+so in the run log; `SURE_SYNC_HEADLESS=1` forces headless. Start the app with `SURE_SYNC_DEBUG=1` and
 each connection gets a **Debug run** button: a dry run with a visible, slowed
 down browser (needs a display, e.g. WSLg on Windows) that also saves the bank's
 JSON responses and downloaded files to the run's debug folder.

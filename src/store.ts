@@ -50,6 +50,8 @@ export const SettingsSchema = z.object({
   mfaTimeoutSeconds: z.coerce.number().int().min(30, "MFA timeout must be 30-3600s").max(3600, "MFA timeout must be 30-3600s"),
   /** never write to Sure; log what would have been sent */
   dryRun: z.boolean(),
+  /** save the browser's network log with failed runs' debug files (debug runs always do) */
+  saveNetworkLog: z.boolean(),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
@@ -62,6 +64,7 @@ export const DEFAULT_SETTINGS: Settings = {
   skipPending: true,
   mfaTimeoutSeconds: 300,
   dryRun: false,
+  saveNetworkLog: false,
 };
 
 export interface User {

@@ -260,6 +260,7 @@ export function createApp(svc: Services) {
       skipPending: b.skipPending === "on",
       mfaTimeoutSeconds: str(b, "mfaTimeoutSeconds"),
       dryRun: b.dryRun === "on",
+      saveNetworkLog: b.saveNetworkLog === "on",
     };
     try {
       store.saveSettings(input);
@@ -479,6 +480,18 @@ export function createApp(svc: Services) {
     return c.redirect(path, 303);
   });
 
+  app.post("/connections/:id/cancel", (c) => {
+    const id = c.req.param("id");
+    if (!store.connection(id)) return c.notFound();
+    const ok = svc.runner.cancel(id);
+    let path = "/";
+    try {
+      const back = c.req.header("referer");
+      if (back) path = new URL(back).pathname;
+    } catch {}
+    return redirect(c, path, ok ? `Cancelling ${id}…` : `${id} isn't running`);
+  });
+
   app.post("/connections/:id/mfa", async (c) => {
     const b = await c.req.parseBody();
     svc.mfa.submit(c.req.param("id"), str(b, "code"));
@@ -509,7 +522,8 @@ export function createApp(svc: Services) {
     const run = runs.get(Number(c.req.param("id")));
     if (!run) return c.notFound();
     const files = await readdir(join(svc.dataDir, "debug", `run-${run.id}`)).catch(() => [] as string[]);
-    return page(c, <RunPage run={run} shots={files.filter((f) => f.endsWith(".png")).sort()} />);
+    const logs = ["console.txt", "network.txt"].filter((f) => files.includes(f));
+    return page(c, <RunPage run={run} shots={files.filter((f) => f.endsWith(".png")).sort()} logs={logs} msg={msgOf(c)} />);
   });
 
   app.get("/runs/:id{[0-9]+}/debug/:name", async (c) => {

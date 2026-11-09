@@ -1,8 +1,9 @@
 /** Runs one sync for one connection: scrape -> map -> dedupe -> push to Sure. */
-import { mkdir, readdir, rm } from "node:fs/promises";
+import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { chromium, type BrowserContext, type Page } from "playwright";
 import { logger } from "./log.js";
+import { virtualDisplay } from "./display.js";
 import { MfaBroker } from "./mfa.js";
 import type { BankTransaction } from "./models.js";
 import { PROVIDERS, ProviderError, snapshot, type DateRange, type ProviderContext } from "./providers/index.js";
@@ -24,6 +25,8 @@ const PAUSE_ON_ERROR = process.env.SURE_SYNC_PAUSE_ON_ERROR === "1";
 const RUNS_KEPT = 500;
 
 export class AlreadyRunning extends Error {}
+/** The run was cancelled from the UI. */
+export class Cancelled extends Error {}
 
 export interface RunOptions {
   dryRun?: boolean;
@@ -72,15 +75,85 @@ function trackNavigation(browser: BrowserContext, rlog: (m: string) => void): vo
   });
 }
 
+const BROWSER_LOG_MAX = 5000;
+
+/**
+ * Console messages and network requests from a run's browser, kept in memory
+ * and written next to the debug screenshots (console.txt, network.txt).
+ * Network lines have no headers, cookies or bodies, and URLs lose their query.
+ */
+function recordBrowser(browser: BrowserContext, timezone: string) {
+  const consoleLines: string[] = [];
+  const network: string[] = [];
+  const now = () => new Date().toLocaleTimeString("en-GB", { timeZone: timezone, hour12: false });
+  const push = (list: string[], line: string) => {
+    if (list.length < BROWSER_LOG_MAX) list.push(line);
+    else if (list.length === BROWSER_LOG_MAX) list.push("… (log truncated)");
+  };
+  const tabOf = (page: Page) => {
+    const i = browser.pages().indexOf(page);
+    return i > 0 ? ` [tab ${i}]` : "";
+  };
+  const watch = (page: Page) => {
+    page.on("console", (m) => {
+      const loc = m.location();
+      const where = loc.url ? ` (${navLabel(loc.url)}:${loc.lineNumber})` : "";
+      push(consoleLines, `${now()}${tabOf(page)} ${m.type().padEnd(7)} ${m.text().replace(/\s+/g, " ").slice(0, 2000)}${where}`);
+    });
+    page.on("pageerror", (e) => push(consoleLines, `${now()}${tabOf(page)} pageerror ${e.message.replace(/\s+/g, " ").slice(0, 2000)}`));
+  };
+  browser.pages().forEach(watch);
+  browser.on("page", watch);
+
+  const skip = (url: string) => url.startsWith("data:") || url.startsWith("blob:");
+  browser.on("requestfinished", async (req) => {
+    if (skip(req.url())) return;
+    const res = await req.response().catch(() => null);
+    const ms = Math.round(req.timing().responseEnd);
+    push(network, `${now()} ${req.method().padEnd(6)} ${String(res?.status() ?? "-").padEnd(3)} ${req.resourceType().padEnd(10)} ${ms >= 0 ? `${ms}ms`.padStart(7) : "      -"} ${navLabel(req.url())}`);
+  });
+  browser.on("requestfailed", (req) => {
+    if (skip(req.url())) return;
+    push(network, `${now()} ${req.method().padEnd(6)} ERR ${req.resourceType().padEnd(10)}       - ${navLabel(req.url())} (${req.failure()?.errorText ?? "failed"})`);
+  });
+
+  return {
+    /** Latest lines, for the live browser view. */
+    tail(n: number): { console: string[]; network: string[] } {
+      return { console: consoleLines.slice(-n), network: network.slice(-n) };
+    },
+    async write(dir: string, withNetwork: boolean): Promise<void> {
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, "console.txt"), consoleLines.join("\n") + "\n");
+      if (withNetwork) await writeFile(join(dir, "network.txt"), network.join("\n") + "\n");
+    },
+  };
+}
+
 class Semaphore {
   #free: number;
   #waiters: (() => void)[] = [];
   constructor(n: number) {
     this.#free = n;
   }
-  async use<T>(fn: () => Promise<T>): Promise<T> {
+  /** Run `fn` once a slot is free. Aborting `signal` while queued gives up the place in line. */
+  async use<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    signal?.throwIfAborted();
     if (this.#free > 0) this.#free--;
-    else await new Promise<void>((r) => this.#waiters.push(r));
+    else {
+      await new Promise<void>((resolve, reject) => {
+        const waiter = () => {
+          signal?.removeEventListener("abort", onAbort);
+          resolve();
+        };
+        const onAbort = () => {
+          this.#waiters = this.#waiters.filter((w) => w !== waiter);
+          reject(signal!.reason);
+        };
+        this.#waiters.push(waiter);
+        signal?.addEventListener("abort", onAbort, { once: true });
+      });
+    }
     try {
       return await fn();
     } finally {
@@ -99,8 +172,17 @@ export function dateRange(tz: string, days: number, now = new Date()): DateRange
   return { since: d.toISOString().slice(0, 10), until };
 }
 
+interface ActiveRun {
+  runId?: number;
+  abort: AbortController;
+  /** open while scraping; closed on cancel so in-flight browser steps fail fast */
+  browser?: BrowserContext;
+  /** console + network of the run's browser, while it's open */
+  browserLog?: ReturnType<typeof recordBrowser>;
+}
+
 export class Runner {
-  readonly #running = new Set<string>();
+  readonly #active = new Map<string, ActiveRun>();
   readonly #browsers: Semaphore;
 
   constructor(
@@ -114,7 +196,18 @@ export class Runner {
   }
 
   isRunning(connectionId: string): boolean {
-    return this.#running.has(connectionId);
+    return this.#active.has(connectionId);
+  }
+
+  /** Stop a run in progress. Returns false when nothing is running for the connection. */
+  cancel(connectionId: string): boolean {
+    const active = this.#active.get(connectionId);
+    if (!active || active.abort.signal.aborted) return !!active;
+    log.info(`cancelling run of ${connectionId}`);
+    active.abort.abort(new Cancelled("cancelled from the web UI"));
+    this.mfa.cancel(connectionId);
+    active.browser?.close().catch(() => {});
+    return true;
   }
 
   /**
@@ -129,18 +222,20 @@ export class Runner {
   ): Promise<number> {
     const conn = this.store.connection(connectionId);
     if (!conn) throw new UnknownConnection(connectionId);
-    if (this.#running.has(connectionId)) throw new AlreadyRunning(connectionId);
-    this.#running.add(connectionId);
+    if (this.#active.has(connectionId)) throw new AlreadyRunning(connectionId);
+    const active: ActiveRun = { abort: new AbortController() };
+    this.#active.set(connectionId, active);
     try {
       const settings = this.store.settings();
       const debug = DEBUG_TOOLS && (opts.debug ?? false);
       const discover = opts.discover ?? false;
       const dryRun = discover || debug || (opts.dryRun ?? settings.dryRun);
       const runId = this.runs.start(connectionId, conn.userName, discover ? "discover" : trigger, dryRun);
-      await this.#run(runId, conn, settings, { dryRun, discover, debug });
+      active.runId = runId;
+      await this.#run(runId, conn, settings, { dryRun, discover, debug }, active);
       return runId;
     } finally {
-      this.#running.delete(connectionId);
+      this.#active.delete(connectionId);
     }
   }
 
@@ -152,8 +247,9 @@ export class Runner {
     });
   }
 
-  async #run(runId: number, conn: Connection, settings: Settings, flags: RunFlags): Promise<void> {
+  async #run(runId: number, conn: Connection, settings: Settings, flags: RunFlags, active: ActiveRun): Promise<void> {
     const { dryRun, discover } = flags;
+    const signal = active.abort.signal;
     const rlog = (msg: string) => {
       log.info(`[${conn.id} #${runId}] ${msg}`);
       const t = new Date().toLocaleTimeString("en-GB", { timeZone: settings.timezone, hour12: false });
@@ -174,9 +270,11 @@ export class Runner {
       if (discover) rlog("DISCOVER: listing accounts only, no transactions fetched");
       else if (dryRun) rlog("DRY RUN: nothing will be written to Sure");
       rlog(`waiting for browser slot (${conn.provider}, ${range.since} → ${range.until})`);
-      const txns = await this.#browsers.use(() =>
-        this.#scrape(runId, conn, settings, creds, debugDir, range, rlog, flags),
+      const txns = await this.#browsers.use(
+        () => this.#scrape(runId, conn, settings, creds, debugDir, range, rlog, flags, active),
+        signal,
       );
+      signal.throwIfAborted();
       if (discover) {
         const n = this.store.bankAccounts(conn.id).length;
         this.runs.finish(runId, "success", stats);
@@ -186,13 +284,18 @@ export class Runner {
       stats.fetched = txns.length;
       rlog(`fetched ${txns.length} transactions`);
 
-      await pushTransactions({ store: this.store, runs: this.runs }, conn, settings, txns, stats, rlog, dryRun);
+      await pushTransactions({ store: this.store, runs: this.runs, signal }, conn, settings, txns, stats, rlog, dryRun);
       this.runs.finish(runId, "success", stats);
       rlog(
         `done${dryRun ? " (dry run)" : ""}: ${stats.created} ${dryRun ? "would be created" : "new"}, ` +
           `${stats.skipped} already synced, ${stats.unmapped} unmapped`,
       );
     } catch (e) {
+      if (signal.aborted) {
+        rlog("CANCELLED");
+        this.runs.finish(runId, "cancelled", stats, "cancelled from the web UI");
+        return;
+      }
       const expected = e instanceof ProviderError || e instanceof SureError;
       const msg = e instanceof Error ? (expected ? e.message : `${e.name}: ${e.message}`) : String(e);
       rlog(`FAILED: ${msg}`);
@@ -213,21 +316,48 @@ export class Runner {
     range: DateRange,
     rlog: (m: string) => void,
     flags: RunFlags,
+    active: ActiveRun,
   ): Promise<BankTransaction[]> {
     const { discover, debug } = flags;
     const profile = join(this.dataDir, "browser", conn.id);
     await mkdir(profile, { recursive: true });
+    // Debug runs: a window on your screen. Other runs: a window on a virtual
+    // screen (Xvfb), because some banks block windowless Chrome. Headless only
+    // as a fallback when Xvfb isn't available.
+    const display = debug ? null : await virtualDisplay();
+    rlog(`browser: ${debug ? "visible window" : display ? "window on virtual screen" : "headless (Xvfb not available)"}`);
     const browser = await chromium.launchPersistentContext(profile, {
-      headless: !debug,
+      headless: !debug && !display,
+      env: display ? { ...process.env, DISPLAY: display } : undefined,
       slowMo: debug ? Number(process.env.SURE_SYNC_SLOWMO ?? 150) : undefined,
       acceptDownloads: true,
       locale: "en-AU",
       timezoneId: settings.timezone,
-      viewport: { width: 1366, height: 900 },
-      args: ["--disable-blink-features=AutomationControlled"],
+      // Debug: follow the real window so the page scrolls and resizes normally. Otherwise a fixed size.
+      viewport: debug ? null : { width: 1366, height: 900 },
+      args: [
+        "--disable-blink-features=AutomationControlled",
+        ...(debug ? ["--window-size=1366,960"] : display ? ["--window-size=1366,1000", "--window-position=0,0"] : []),
+      ],
+    });
+    let closedByUser = false;
+    browser.on("close", () => {
+      if (!active.abort.signal.aborted && active.browser) closedByUser = true;
     });
 
+    // Playwright waits forever by default; a stuck step should fail instead.
+    browser.setDefaultTimeout(30_000);
+    browser.setDefaultNavigationTimeout(45_000);
+    active.browser = browser;
+    if (active.abort.signal.aborted) {
+      await browser.close();
+      throw active.abort.signal.reason;
+    }
+
     trackNavigation(browser, rlog);
+    const browserLog = recordBrowser(browser, settings.timezone);
+    active.browserLog = browserLog;
+    let failed = false;
 
     const ctx: ProviderContext = {
       connectionId: conn.id,
@@ -262,6 +392,9 @@ export class Runner {
       await provider.logout?.().catch((e: Error) => rlog(`logout failed (ignored): ${e.message}`));
       return txns;
     } catch (e) {
+      failed = true;
+      if (active.abort.signal.aborted) throw e;
+      if (closedByUser) throw new ProviderError("the browser window was closed before the run finished");
       await snapshot(ctx, "failure");
       if (debug && PAUSE_ON_ERROR) {
         rlog(`paused on error for inspection: ${(e as Error).message}. Press Resume in the Playwright Inspector to finish.`);
@@ -269,7 +402,13 @@ export class Runner {
       }
       throw e;
     } finally {
-      await browser.close();
+      if (failed || debug) {
+        await browserLog
+          .write(debugDir, debug || settings.saveNetworkLog)
+          .catch((e: Error) => rlog(`couldn't save browser logs: ${e.message}`));
+      }
+      active.browser = undefined;
+      await browser.close().catch(() => {});
     }
   }
 

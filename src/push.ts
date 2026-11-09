@@ -15,6 +15,8 @@ export interface PushDeps {
   importTimeoutMs?: number;
   /** delay between import status checks (ms) */
   pollMs?: number;
+  /** stop before the next import / status check when aborted */
+  signal?: AbortSignal;
 }
 
 const DONE = new Set(["complete"]);
@@ -98,6 +100,7 @@ export async function pushTransactions(
   for (const [accountId, t] of todo) byAccount.set(accountId, [...(byAccount.get(accountId) ?? []), t]);
 
   for (const [accountId, rows] of byAccount) {
+    deps.signal?.throwIfAborted();
     log(`importing ${rows.length} transactions into Sure account ${accountId}`);
     const created = await sure.createTransactionImport(accountId, toImportCsv(rows));
     const result = await waitForImport(sure, created, deps, log);
@@ -125,6 +128,7 @@ async function waitForImport(
       throw new SureError(`Sure import ${imp.id} ${current.status}${current.error ? `: ${current.error}` : ""}`);
     }
     if (Date.now() > deadline) return { status: "timeout" };
+    deps.signal?.throwIfAborted();
     await new Promise((r) => setTimeout(r, deps.pollMs ?? 2000));
     current = await sure.getImport(imp.id);
     log(`import ${imp.id}: ${current.status}`);

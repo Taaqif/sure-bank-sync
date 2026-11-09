@@ -1,3 +1,4 @@
+import { stopDisplay } from "./display.js";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { serve } from "@hono/node-server";
@@ -99,6 +100,7 @@ async function main() {
   const shutdown = () => {
     log.info("shutting down");
     scheduler.stop();
+    stopDisplay();
     server.close();
     setTimeout(() => process.exit(0), 2000).unref();
   };

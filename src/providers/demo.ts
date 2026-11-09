@@ -12,6 +12,12 @@ export const demo: ProviderDefinition = {
   create: (ctx) => ({
     async login() {
       ctx.log("demo: logging in");
+      if (ctx.options.fail) {
+        const page = ctx.browser.pages()[0] ?? (await ctx.browser.newPage());
+        await page.setContent(`<h1>Demo bank is down</h1><script>console.warn("demo: login service unavailable")</script>`);
+        await page.waitForTimeout(200);
+        throw new AuthError("demo: login failed on purpose");
+      }
       if (ctx.options.mfa) {
         const code = await ctx.requestMfa("Demo bank: enter any 6 digit code");
         if (!/^\d{6}$/.test(code)) throw new AuthError("demo: code must be 6 digits");

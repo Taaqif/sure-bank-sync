@@ -112,9 +112,13 @@ export function DashboardStatus(p: DashboardProps) {
                 </td>
                 <td>{r.last ? `${r.last.created} / ${r.last.fetched}` : ""}</td>
                 <td>
-                  <form method="post" action={`/connections/${r.conn.id}/run`}>
-                    <button type="submit" disabled={r.running}>Run now</button>
-                  </form>
+                  {r.running ? (
+                    <CancelButton connectionId={r.conn.id} />
+                  ) : (
+                    <form method="post" action={`/connections/${r.conn.id}/run`}>
+                      <button type="submit">Run now</button>
+                    </form>
+                  )}
                 </td>
               </tr>
             ))}
@@ -183,6 +187,14 @@ export const SettingsPage = (p: { s: Settings; msg?: string; error?: string }) =
         <small class="hint" style="margin-top:-10px">
           Every sync scrapes the bank and reads Sure, but only logs the transactions it would create. Nothing is
           written or marked as synced, so turning this off later imports them for real.
+        </small>
+        <label class="check">
+          <input type="checkbox" name="saveNetworkLog" checked={p.s.saveNetworkLog} /> Save network log with failed runs
+        </label>
+        <small class="hint" style="margin-top:-10px">
+          Failed runs always keep a screenshot, the page HTML and the browser console. This adds every request the
+          bank's page made (method, status, address without query string; no headers, cookies or bodies). Debug runs
+          always include it.
         </small>
         <label>
           Source tag
@@ -425,6 +437,7 @@ export const ConnectionPage = (p: {
           </button>
           <button type="submit" disabled={p.running}>{p.running ? "Running…" : "Run now"}</button>
         </form>
+        {p.running && <CancelButton connectionId={p.conn.id} />}
       </div>
 
       <h2 id="accounts">Accounts</h2>
@@ -518,12 +531,26 @@ export const ConnectionPage = (p: {
 
 // --- runs ------------------------------------------------------------------
 
-export const RunPage = (p: { run: Run; shots: string[] }) => (
-  <Layout title={`Run ${p.run.id}`} nav="dashboard">
-    <h2>
-      Run #{p.run.id} · <a href={`/connections/${p.run.connectionId}`}>{p.run.connectionId}</a> <Badge status={p.run.status} />
-      {p.run.dryRun && <span class="tag">dry run: nothing written</span>}
-    </h2>
+/** Stops the connection's run in progress (closes its browser). */
+export const CancelButton = (p: { connectionId: string }) => (
+  <form method="post" action={`/connections/${p.connectionId}/cancel`}>
+    <button type="submit" class="danger" title="Stop this run now. Nothing more is written to Sure.">
+      Cancel
+    </button>
+  </form>
+);
+
+export const RunPage = (p: { run: Run; shots: string[]; logs?: string[]; msg?: string }) => {
+  const live = p.run.status === "running" || p.run.status === "awaiting_mfa";
+  return (
+  <Layout title={`Run ${p.run.id}`} nav="dashboard" msg={p.msg}>
+    <div class="row between">
+      <h2>
+        Run #{p.run.id} · <a href={`/connections/${p.run.connectionId}`}>{p.run.connectionId}</a> <Badge status={p.run.status} />
+        {p.run.dryRun && <span class="tag">dry run: nothing written</span>}
+      </h2>
+      {live && <CancelButton connectionId={p.run.connectionId} />}
+    </div>
     <p class="muted">
       {p.run.trigger} · started {p.run.startedAt}
       {p.run.finishedAt && ` · finished ${p.run.finishedAt}`}
@@ -533,6 +560,19 @@ export const RunPage = (p: { run: Run; shots: string[] }) => (
     {p.run.error && <pre class="failed">{p.run.error}</pre>}
     <h2>Log</h2>
     <pre>{p.run.log || "(empty)"}</pre>
+    {p.logs && p.logs.length > 0 && (
+      <>
+        <h2>Browser logs</h2>
+        <p>
+          {p.logs.map((f, i) => (
+            <>
+              {i > 0 && " · "}
+              <a href={`/runs/${p.run.id}/debug/${f}`}>{f === "console.txt" ? "Console" : f === "network.txt" ? "Network" : f}</a>
+            </>
+          ))}
+        </p>
+      </>
+    )}
     {p.shots.length > 0 && (
       <>
         <h2>Debug screenshots</h2>
@@ -551,7 +591,8 @@ export const RunPage = (p: { run: Run; shots: string[] }) => (
       </>
     )}
   </Layout>
-);
+  );
+};
 
 // --- logs ------------------------------------------------------------------
 

@@ -169,4 +169,20 @@ describe("web", () => {
     const r = await get(app, `/runs/${runId}/debug/failure-0.html`);
     expect(r.headers.get("content-type")).toContain("text/plain");
   });
+
+  it("saves the browser console with a failed run's debug files", async () => {
+    const env = setup();
+    const { app, runner } = makeApp(env);
+    const id = env.store.saveConnection(null, {
+      userId: env.userId, provider: "demo", enabled: false, schedule: null, lookbackDays: null,
+      credentials: {}, options: { fail: true },
+    });
+    const runId = await runner.run(id, "manual", { discover: true });
+    expect(env.runs.get(runId)!.status).toBe("failed");
+    const page = await (await get(app, `/runs/${runId}`)).text();
+    expect(page).toContain(">Console</a>");
+    expect(page).not.toContain(">Network</a>"); // off by default
+    const log = await (await get(app, `/runs/${runId}/debug/console.txt`)).text();
+    expect(log).toContain("warning demo: login service unavailable");
+  }, 30_000);
 });

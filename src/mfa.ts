@@ -1,6 +1,7 @@
 /** Hand-off for one-time codes: a scraper waits, a human types it into the web UI. */
 
 export class MfaTimeout extends Error {}
+export class MfaCancelled extends Error {}
 
 export interface MfaRequest {
   connectionId: string;
@@ -11,6 +12,7 @@ export interface MfaRequest {
 
 interface Pending extends MfaRequest {
   resolve: (code: string) => void;
+  reject: (e: Error) => void;
 }
 
 export class MfaBroker {
@@ -40,6 +42,11 @@ export class MfaBroker {
           this.#pending.delete(connectionId);
           resolve(code);
         },
+        reject: (e) => {
+          clearTimeout(timer);
+          this.#pending.delete(connectionId);
+          reject(e);
+        },
       });
     });
   }
@@ -49,5 +56,10 @@ export class MfaBroker {
     if (!p) return false;
     p.resolve(code.trim());
     return true;
+  }
+
+  /** Drop a pending prompt; the waiting run gets MfaCancelled. */
+  cancel(connectionId: string): void {
+    this.#pending.get(connectionId)?.reject(new MfaCancelled("cancelled"));
   }
 }

@@ -289,3 +289,35 @@ describe("sessions", async () => {
     for (const bad of ["//evil.com", "https://evil.com", "/\\evil.com", "", undefined]) expect(safeNext(bad)).toBe("/");
   });
 });
+
+describe("cancel", () => {
+  it("stops a run waiting for an MFA code and marks it cancelled", async () => {
+    const { MfaBroker } = await import("../src/mfa.js");
+    const { Runner } = await import("../src/runner.js");
+    const env = setup();
+    const id = env.store.saveConnection(null, {
+      userId: env.userId,
+      provider: "demo",
+      enabled: false,
+      schedule: null,
+      lookbackDays: null,
+      credentials: {},
+      options: { mfa: true },
+    });
+    const mfa = new MfaBroker();
+    const runner = new Runner(env.store, env.runs, mfa, env.dir);
+    expect(runner.cancel(id)).toBe(false);
+
+    const done = runner.run(id, "manual");
+    for (let i = 0; i < 300 && !mfa.get(id); i++) await new Promise((r) => setTimeout(r, 50));
+    expect(mfa.get(id)).toBeDefined();
+
+    expect(runner.cancel(id)).toBe(true);
+    const runId = await done;
+    expect(runner.isRunning(id)).toBe(false);
+    expect(mfa.get(id)).toBeUndefined();
+    const run = env.runs.get(runId)!;
+    expect(run.status).toBe("cancelled");
+    expect(run.log).toContain("CANCELLED");
+  }, 30_000);
+});
