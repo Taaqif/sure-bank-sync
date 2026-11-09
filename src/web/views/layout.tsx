@@ -93,6 +93,14 @@ button.link:hover { color: var(--fg); }
 @keyframes live-pulse { 50% { opacity: .55; } }
 .note { margin-top: 4px; padding: 8px 10px; border-left: 3px solid var(--line); background: var(--card); color: var(--muted); font-size: 13px; border-radius: 4px; }
 .screen { display: block; width: 100%; max-width: 1366px; min-height: 200px; border: 1px solid var(--line); border-radius: 6px; cursor: crosshair; background: var(--card); }
+.screen { touch-action: none; -webkit-user-select: none; user-select: none; }
+.remote-tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 0 0 10px; }
+.rkeys { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+@media (max-width: 700px) {
+  #remote .mfa { font-size: 14px; }
+  .rlog { font-size: 10.5px; max-height: 200px; }
+  .row.between { flex-wrap: wrap; gap: 8px; }
+}
 .rlogs { margin-top: 14px; }
 .rlogs summary { cursor: pointer; list-style: none; color: var(--muted); }
 .rlogs summary::-webkit-details-marker { display: none; }

@@ -966,6 +966,49 @@ const REMOTE_JS = `
   img.addEventListener("dragstart", (e) => e.preventDefault());
   img.addEventListener("contextmenu", (e) => e.preventDefault());
 
+  // Touch (phones/tablets): tap = click, one-finger drag = scroll the bank page.
+  let touch = null;
+  img.addEventListener("touchstart", (e) => {
+    if (e.touches.length !== 1) return;
+    const t = e.touches[0];
+    touch = { x: t.clientX, y: t.clientY, lastY: t.clientY, lastX: t.clientX, moved: false };
+  }, { passive: true });
+  img.addEventListener("touchmove", (e) => {
+    if (!touch || e.touches.length !== 1) return;
+    e.preventDefault();
+    const t = e.touches[0];
+    if (Math.abs(t.clientX - touch.x) + Math.abs(t.clientY - touch.y) > 8) touch.moved = true;
+    if (!touch.moved) return;
+    const scale = size.height / img.getBoundingClientRect().height || 1;
+    const dy = (touch.lastY - t.clientY) * scale, dx = (touch.lastX - t.clientX) * scale;
+    touch.lastY = t.clientY; touch.lastX = t.clientX;
+    send({ type: "wheel", ...point(t), dx, dy });
+  }, { passive: false });
+  img.addEventListener("touchend", (e) => {
+    if (!touch) return;
+    if (!touch.moved) {
+      e.preventDefault(); // no synthetic mouse events on top of ours
+      const p = point({ clientX: touch.x, clientY: touch.y });
+      send({ type: "move", ...p });
+      send({ type: "down", ...p });
+      send({ type: "up", ...p });
+    }
+    touch = null;
+  });
+
+  // Phone keyboard: a hidden input opens it; what's typed goes to the bank page.
+  const keys = document.getElementById("rkeys");
+  document.getElementById("rkeyboard").addEventListener("click", () => { keys.value = ""; keys.focus(); });
+  keys.addEventListener("beforeinput", (e) => {
+    e.preventDefault();
+    if (e.inputType === "deleteContentBackward") send({ type: "key", key: "Backspace" });
+    else if (e.inputType === "insertLineBreak") send({ type: "key", key: "Enter" });
+    else if (e.data) for (const ch of e.data) send({ type: "key", key: ch === " " ? "Space" : ch });
+  });
+  keys.addEventListener("keydown", (e) => {
+    if (["Enter", "Backspace", "Tab"].includes(e.key)) { e.preventDefault(); send({ type: "key", key: e.key }); }
+  });
+
   // Logs panel: refreshed while open.
   const logs = document.getElementById("rlogs");
   let logTimer;
@@ -1020,6 +1063,13 @@ export const RemotePage = (p: { connectionId: string; prompt?: string }) => (
           <small id="rstatus" class="muted">
             Connecting…
           </small>
+        </div>
+        <div class="remote-tools">
+          <button type="button" id="rkeyboard" class="secondary">
+            Keyboard
+          </button>
+          <small class="muted">Tap to click, drag to scroll. On a computer, click the picture and type.</small>
+          <input id="rkeys" class="rkeys" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck={false} aria-label="Type into the bank page" />
         </div>
         <img id="screen" class="screen" tabindex={0} draggable={false} alt="Live view of the bank's page" />
         <details id="rlogs" class="rlogs">
