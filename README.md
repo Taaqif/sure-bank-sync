@@ -41,6 +41,13 @@ cron (per connection) → Playwright logs into bank → fetch transactions
   default in Settings and an optional per-connection override.
 - **MFA**: when a bank asks for a code the run pauses and the dashboard shows
   an input box.
+- **CAPTCHAs and other "prove you're human" steps**: the run pauses and the
+  dashboard shows **Open browser**: a live view of the run's (headless)
+  browser where you click and type to solve it. The run carries on by itself
+  once the check is gone, or when you press Done. Nothing is solved
+  automatically. Try it with the demo bank and options `{"captcha": true}`.
+- **Cancel**: any run in progress can be stopped from the dashboard,
+  connection or run page.
 - **Remembered device**: each connection keeps its own browser profile in
   `/data/browser/<id>`, so banks ask for MFA less often.
 - **Debugging**: failed runs save a screenshot + HTML of the page, viewable

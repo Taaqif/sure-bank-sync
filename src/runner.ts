@@ -5,6 +5,7 @@ import { chromium, type BrowserContext, type Page } from "playwright";
 import { logger } from "./log.js";
 import { virtualDisplay } from "./display.js";
 import { MfaBroker } from "./mfa.js";
+import { RemoteHub } from "./remote.js";
 import type { BankTransaction } from "./models.js";
 import { PROVIDERS, ProviderError, snapshot, type DateRange, type ProviderContext } from "./providers/index.js";
 import { pushTransactions } from "./push.js";
@@ -183,6 +184,8 @@ interface ActiveRun {
 
 export class Runner {
   readonly #active = new Map<string, ActiveRun>();
+  /** live browser views for runs waiting on a person */
+  readonly remote = new RemoteHub();
   readonly #browsers: Semaphore;
 
   constructor(
@@ -199,6 +202,13 @@ export class Runner {
     return this.#active.has(connectionId);
   }
 
+  /** Console and network lines from a connection's run in progress (for the browser view). */
+  liveBrowserLog(connectionId: string, n = 300): { runId?: number; console: string[]; network: string[] } | undefined {
+    const active = this.#active.get(connectionId);
+    if (!active?.browserLog) return undefined;
+    return { runId: active.runId, ...active.browserLog.tail(n) };
+  }
+
   /** Stop a run in progress. Returns false when nothing is running for the connection. */
   cancel(connectionId: string): boolean {
     const active = this.#active.get(connectionId);
@@ -206,6 +216,7 @@ export class Runner {
     log.info(`cancelling run of ${connectionId}`);
     active.abort.abort(new Cancelled("cancelled from the web UI"));
     this.mfa.cancel(connectionId);
+    this.remote.close(connectionId).catch(() => {});
     active.browser?.close().catch(() => {});
     return true;
   }
@@ -373,6 +384,32 @@ export class Runner {
         try {
           return await this.mfa.request(conn.id, runId, prompt, settings.mfaTimeoutSeconds * 1000);
         } finally {
+          this.runs.setStatus(runId, "running");
+        }
+      },
+      requestBrowserHelp: async (page, prompt, until) => {
+        rlog(`waiting for you in the browser view: ${prompt}`);
+        this.runs.setStatus(runId, "awaiting_mfa");
+        await this.remote.open(conn.id, page, prompt);
+        const answered = this.mfa.request(conn.id, runId, prompt, settings.mfaTimeoutSeconds * 1000, "browser");
+        let waiting = true;
+        const watch = until
+          ? (async () => {
+              while (waiting) {
+                await new Promise((r) => setTimeout(r, 1500));
+                if (waiting && (await until().catch(() => false))) {
+                  rlog("browser step done");
+                  this.mfa.submit(conn.id, "done");
+                }
+              }
+            })()
+          : Promise.resolve();
+        try {
+          await answered;
+        } finally {
+          waiting = false;
+          await watch;
+          await this.remote.close(conn.id);
           this.runs.setStatus(runId, "running");
         }
       },

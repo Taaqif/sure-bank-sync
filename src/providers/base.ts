@@ -1,7 +1,7 @@
 /** Interface every bank provider implements. */
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { BrowserContext } from "playwright";
+import type { BrowserContext, Page } from "playwright";
 import type { BankAccount, BankTransaction } from "../models.js";
 
 /** Expected failure (bad password, site changed, locked out...). Shown as-is in the UI. */
@@ -27,6 +27,11 @@ export interface ProviderContext {
   log: (msg: string) => void;
   /** prompt -> code typed into the web UI */
   requestMfa: (prompt: string) => Promise<string>;
+  /**
+   * Hand `page` to a person through the web UI's remote browser view (e.g. to
+   * solve a CAPTCHA). Resolves when `until` returns true or they click Done.
+   */
+  requestBrowserHelp: (page: Page, prompt: string, until?: () => Promise<boolean>) => Promise<void>;
 }
 
 /** Save screenshot + HTML of every open page. Call liberally when debugging selectors. */

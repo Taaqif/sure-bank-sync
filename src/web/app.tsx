@@ -2,6 +2,7 @@ import { readFile, readdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { Hono, type Context } from "hono";
+import { streamSSE } from "hono/streaming";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { Child } from "hono/jsx";
@@ -25,6 +26,7 @@ import {
   ConnectionPage,
   DashboardPage,
   DashboardStatus,
+  RemotePage,
   RunPage,
   SettingsPage,
   UserPage,
@@ -490,6 +492,98 @@ export function createApp(svc: Services) {
       if (back) path = new URL(back).pathname;
     } catch {}
     return redirect(c, path, ok ? `Cancelling ${id}…` : `${id} isn't running`);
+  });
+
+  // --- remote browser view (a person solves a CAPTCHA etc.) ----------------
+  app.get("/connections/:id/remote", (c) => {
+    const id = c.req.param("id");
+    if (!store.connection(id)) return c.notFound();
+    const session = svc.runner.remote.get(id);
+    return page(c, <RemotePage connectionId={id} prompt={session?.prompt} />);
+  });
+
+  app.get("/connections/:id/remote/stream", (c) => {
+    const session = svc.runner.remote.get(c.req.param("id"));
+    return streamSSE(c, async (stream) => {
+      if (!session) {
+        await stream.writeSSE({ event: "end", data: "" });
+        return;
+      }
+      let done = false;
+      let wake: () => void = () => {};
+      let pending: { data: string; width: number; height: number } | undefined;
+      const unsubscribe = session.subscribe(
+        (f) => {
+          pending = f;
+          wake();
+        },
+        () => {
+          done = true;
+          wake();
+        },
+      );
+      stream.onAbort(() => {
+        done = true;
+        wake();
+      });
+      try {
+        // Send only the newest frame; a slow client skips frames instead of queueing them.
+        while (!done || pending) {
+          if (pending) {
+            const f = pending;
+            pending = undefined;
+            await stream.writeSSE({ event: "frame", data: JSON.stringify(f) });
+            continue;
+          }
+          await new Promise<void>((r) => {
+            wake = r;
+            setTimeout(r, 15_000); // keep-alive
+          });
+          if (!done && !pending) await stream.writeSSE({ event: "ping", data: "" });
+        }
+        if (session.ended) await stream.writeSSE({ event: "end", data: "" });
+      } finally {
+        unsubscribe();
+      }
+    });
+  });
+
+  app.post("/connections/:id/remote/input", async (c) => {
+    const session = svc.runner.remote.get(c.req.param("id"));
+    if (!session) return c.json({ error: "no_session" }, 404);
+    const b = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+    const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+    try {
+      if (b?.type === "click" || b?.type === "move" || b?.type === "down" || b?.type === "up") {
+        await session.input({ type: b.type, x: num(b.x), y: num(b.y) });
+      }
+      else if (b?.type === "wheel") {
+        await session.input({ type: "wheel", x: num(b.x), y: num(b.y), dx: num(b.dx), dy: num(b.dy) });
+      } else if (b?.type === "key" && typeof b.key === "string" && b.key.length <= 20) {
+        await session.input({ type: "key", key: b.key });
+      } else return c.json({ error: "bad_input" }, 400);
+    } catch (e) {
+      return c.json({ error: (e as Error).message.split("\n")[0] }, 409);
+    }
+    return c.json({ ok: true });
+  });
+
+  // Logs panel in the browser view: run log + the bank page's console and network.
+  app.get("/connections/:id/remote/logs", (c) => {
+    const id = c.req.param("id");
+    const live = svc.runner.liveBrowserLog(id);
+    const run = live?.runId ? runs.get(live.runId) : undefined;
+    return c.json({
+      run: run ? run.log.split("\n").slice(-300).join("\n") : "",
+      console: live?.console ?? [],
+      network: live?.network ?? [],
+    });
+  });
+
+  app.post("/connections/:id/remote/done", (c) => {
+    const id = c.req.param("id");
+    if (svc.mfa.get(id)?.kind === "browser") svc.mfa.submit(id, "done");
+    return redirect(c, `/connections/${id}`, "Run continued");
   });
 
   app.post("/connections/:id/mfa", async (c) => {

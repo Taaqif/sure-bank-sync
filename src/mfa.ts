@@ -7,6 +7,8 @@ export interface MfaRequest {
   connectionId: string;
   runId: number;
   prompt: string;
+  /** "code": type a code; "browser": do something in the remote browser view */
+  kind: "code" | "browser";
   createdAt: Date;
 }
 
@@ -26,7 +28,7 @@ export class MfaBroker {
     return [...this.#pending.values()];
   }
 
-  request(connectionId: string, runId: number, prompt: string, timeoutMs: number): Promise<string> {
+  request(connectionId: string, runId: number, prompt: string, timeoutMs: number, kind: MfaRequest["kind"] = "code"): Promise<string> {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(connectionId);
@@ -36,6 +38,7 @@ export class MfaBroker {
         connectionId,
         runId,
         prompt,
+        kind,
         createdAt: new Date(),
         resolve: (code) => {
           clearTimeout(timer);

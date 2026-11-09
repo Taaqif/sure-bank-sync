@@ -170,6 +170,49 @@ describe("web", () => {
     expect(r.headers.get("content-type")).toContain("text/plain");
   });
 
+  it("lets a person finish a browser check through the remote view", async () => {
+    const env = setup();
+    const { app, runner, mfa } = makeApp(env);
+    const id = env.store.saveConnection(null, {
+      userId: env.userId, provider: "demo", enabled: false, schedule: null, lookbackDays: null,
+      credentials: {}, options: { captcha: true },
+    });
+    const done = runner.run(id, "manual", { discover: true });
+    for (let i = 0; i < 300 && mfa.get(id)?.kind !== "browser"; i++) await new Promise((r) => setTimeout(r, 50));
+    expect(mfa.get(id)?.kind).toBe("browser");
+
+    expect(await (await get(app, "/")).text()).toContain("Open browser");
+    expect(await (await get(app, `/connections/${id}/remote`)).text()).toContain("type any word");
+
+    // The stream sends a frame of the page.
+    const stream = await get(app, `/connections/${id}/remote/stream`);
+    const reader = stream.body!.getReader();
+    let seen = "";
+    while (!seen.includes("event: frame")) seen += new TextDecoder().decode((await reader.read()).value);
+    await reader.cancel();
+    expect(seen).toMatch(/"width":\d+/);
+
+    // Keyboard only, so the test doesn't depend on layout: focus the box, type, tab to the button, press it.
+    const input = (body: object) =>
+      app.request(`/connections/${id}/remote/input`, {
+        method: "POST", headers: { Host: "localhost", "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+    expect((await input({ type: "click", x: 5, y: 5 })).status).toBe(200);
+    for (const type of ["move", "down", "up"]) expect((await input({ type, x: 6, y: 6 })).status).toBe(200);
+    const logs = (await (await get(app, `/connections/${id}/remote/logs`)).json()) as any;
+    expect(logs.run).toContain("waiting for you in the browser view");
+    expect(Array.isArray(logs.network)).toBe(true);
+    for (const key of ["Tab", "h", "i", "Tab", "Enter"]) expect((await input({ type: "key", key })).status).toBe(200);
+    expect((await input({ type: "nope" })).status).toBe(400);
+
+    const runId = await done;
+    expect(env.runs.get(runId)!.status).toBe("success");
+    expect(env.runs.get(runId)!.log).toContain("browser step done");
+    expect(mfa.get(id)).toBeUndefined();
+    expect(runner.remote.get(id)).toBeUndefined();
+    expect((await input({ type: "key", key: "a" })).status).toBe(404);
+  }, 60_000);
+
   it("saves the browser console with a failed run's debug files", async () => {
     const env = setup();
     const { app, runner } = makeApp(env);

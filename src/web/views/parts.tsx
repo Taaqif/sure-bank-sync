@@ -23,7 +23,10 @@ export function formatWhen(d: Date | null, tz: string): string {
   }).format(d);
 }
 
-export const Badge = (p: { status: string; label?: string }) => <span class={`badge ${p.status}`}>{p.label ?? p.status}</span>;
+const STATUS_LABEL: Record<string, string> = { awaiting_mfa: "needs you" };
+export const Badge = (p: { status: string; label?: string }) => (
+  <span class={`badge ${p.status}`}>{p.label ?? STATUS_LABEL[p.status] ?? p.status}</span>
+);
 
 export function RunsTable({ runs }: { runs: Run[] }) {
   return (

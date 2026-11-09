@@ -79,6 +79,15 @@ button.link:hover { color: var(--fg); }
 .login form { display: grid; gap: 14px; }
 .login label { display: grid; gap: 4px; font-weight: 500; }
 .login button[type=submit] { padding: 9px 12px; margin-top: 4px; }
+.screen { display: block; width: 100%; max-width: 1366px; min-height: 200px; border: 1px solid var(--line); border-radius: 6px; cursor: crosshair; background: var(--card); }
+.rlogs { margin-top: 14px; }
+.rlogs summary { cursor: pointer; list-style: none; color: var(--muted); }
+.rlogs summary::-webkit-details-marker { display: none; }
+.rlogs .button-like { display: inline-block; padding: 5px 12px; border-radius: 6px; border: 1px solid var(--line); color: var(--fg); margin-right: 8px; }
+.rlogs[open] .button-like { background: var(--card); }
+.rlogs h3 { font-size: 13px; margin: 14px 0 6px; color: var(--muted); font-weight: 600; }
+.rlog { max-height: 260px; overflow: auto; font-size: 11.5px; margin: 0; white-space: pre; }
+.screen:focus { outline: 2px solid var(--run); outline-offset: 2px; }
 .shots img { max-width: 100%; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 12px; }
 `;
 

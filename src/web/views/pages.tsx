@@ -41,7 +41,13 @@ function SetupHint({ settings, hasUsers, rows }: DashboardProps) {
 
 function StatusCell({ r }: { r: ConnectionRow }) {
   if (!r.conn.enabled) return <Badge status="disabled" />;
-  if (r.mfa) return <Badge status="awaiting_mfa" label="awaiting code" />;
+  if (r.mfa) {
+    return (
+      <a href={r.mfa.kind === "browser" ? `/connections/${r.conn.id}/remote` : "#needs-you"}>
+        <Badge status="awaiting_mfa" label={r.mfa.kind === "browser" ? "needs you: browser" : "needs you: code"} />
+      </a>
+    );
+  }
   if (r.running) return <Badge status="running" />;
   if (r.last)
     return (
@@ -64,11 +70,24 @@ export function DashboardStatus(p: DashboardProps) {
             <strong>
               {r.conn.userName} · {r.conn.id}
             </strong>{" "}
-            needs a code: {r.mfa!.prompt}
-            <form method="post" action={`/connections/${r.conn.id}/mfa`}>
-              <input type="text" name="code" autocomplete="one-time-code" inputmode="numeric" required />
-              <button type="submit">Submit</button>
-            </form>
+            {r.mfa!.kind === "browser" ? (
+              <>
+                needs you in the browser: {r.mfa!.prompt}
+                <div style="margin-top:8px">
+                  <a href={`/connections/${r.conn.id}/remote`}>
+                    <button type="button">Open browser</button>
+                  </a>
+                </div>
+              </>
+            ) : (
+              <>
+                needs a code: {r.mfa!.prompt}
+                <form method="post" action={`/connections/${r.conn.id}/mfa`}>
+                  <input type="text" name="code" autocomplete="one-time-code" inputmode="numeric" required />
+                  <button type="submit">Submit</button>
+                </form>
+              </>
+            )}
           </div>
         ))}
 
@@ -681,4 +700,141 @@ export const LoginPage = (p: { next: string; error?: string; username?: string }
       </div>
     </div>
   </BareLayout>
+);
+
+// --- remote browser view -----------------------------------------------------
+
+const REMOTE_JS = `
+(() => {
+  const root = document.getElementById("remote");
+  const id = root.dataset.id;
+  const img = document.getElementById("screen");
+  const status = document.getElementById("rstatus");
+  let size = { width: 0, height: 0 };
+  // Inputs go one at a time, in order. Consecutive mouse moves collapse into
+  // the latest one so a slow connection doesn't build up a backlog.
+  const queue = [];
+  let busy = false;
+  const send = (body) => {
+    const last = queue[queue.length - 1];
+    if (body.type === "move" && last && last.type === "move") queue[queue.length - 1] = body;
+    else queue.push(body);
+    pump();
+  };
+  async function pump() {
+    if (busy) return;
+    busy = true;
+    while (queue.length) {
+      const body = queue.shift();
+      try {
+        const r = await fetch("/connections/" + encodeURIComponent(id) + "/remote/input", {
+          method: "POST", credentials: "same-origin",
+          headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+        });
+        if (!r.ok) r.json().then((j) => status.textContent = "Input not delivered: " + (j.error || r.status)).catch(() => {});
+      } catch { status.textContent = "Connection lost"; }
+    }
+    busy = false;
+  }
+  const point = (e) => {
+    const r = img.getBoundingClientRect();
+    return { x: (e.clientX - r.left) / r.width * size.width, y: (e.clientY - r.top) / r.height * size.height };
+  };
+  const es = new EventSource("/connections/" + encodeURIComponent(id) + "/remote/stream");
+  es.addEventListener("frame", (e) => {
+    const f = JSON.parse(e.data);
+    size = { width: f.width, height: f.height };
+    img.src = "data:image/jpeg;base64," + f.data;
+    status.textContent = "Live. Click and type in the picture below.";
+  });
+  es.addEventListener("end", () => {
+    es.close();
+    status.textContent = "The run no longer needs you. Back to the connection…";
+    setTimeout(() => { location.href = "/connections/" + encodeURIComponent(id); }, 1500);
+  });
+  es.onerror = () => { status.textContent = "Reconnecting…"; };
+  // Mouse: movement (throttled), press and release, so hover, clicks and drags all reach the page.
+  let lastMove = 0;
+  img.addEventListener("mousemove", (e) => {
+    const now = Date.now();
+    if (now - lastMove < 40) return;
+    lastMove = now;
+    send({ type: "move", ...point(e) });
+  });
+  img.addEventListener("mousedown", (e) => { e.preventDefault(); img.focus(); send({ type: "down", ...point(e) }); });
+  img.addEventListener("mouseup", (e) => { e.preventDefault(); send({ type: "up", ...point(e) }); });
+  img.addEventListener("dragstart", (e) => e.preventDefault());
+  img.addEventListener("contextmenu", (e) => e.preventDefault());
+
+  // Logs panel: refreshed while open.
+  const logs = document.getElementById("rlogs");
+  let logTimer;
+  async function loadLogs() {
+    try {
+      const r = await fetch("/connections/" + encodeURIComponent(id) + "/remote/logs", { credentials: "same-origin" });
+      if (r.ok) {
+        const d = await r.json();
+        for (const [k, text] of [["run", d.run], ["console", d.console.join("\\n")], ["network", d.network.join("\\n")]]) {
+          const pre = document.getElementById("rlog-" + k);
+          const follow = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 30;
+          pre.textContent = text || "(nothing yet)";
+          if (follow) pre.scrollTop = pre.scrollHeight;
+        }
+      }
+    } catch {}
+    if (logs.open) logTimer = setTimeout(loadLogs, 2000);
+  }
+  logs.addEventListener("toggle", () => { clearTimeout(logTimer); if (logs.open) loadLogs(); });
+  img.addEventListener("wheel", (e) => { e.preventDefault(); send({ type: "wheel", ...point(e), dx: e.deltaX, dy: e.deltaY }); }, { passive: false });
+  img.addEventListener("keydown", (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    e.preventDefault();
+    send({ type: "key", key: e.key === " " ? "Space" : e.key });
+  });
+  window.refreshLive = () => {};
+})();`;
+
+export const RemotePage = (p: { connectionId: string; prompt?: string }) => (
+  <Layout title={`Browser · ${p.connectionId}`} nav="dashboard" script={p.prompt ? REMOTE_JS : undefined}>
+    <div class="row between">
+      <h2>
+        <a href={`/connections/${p.connectionId}`}>{p.connectionId}</a> · browser
+      </h2>
+      {p.prompt && (
+        <div class="row">
+          <form method="post" action={`/connections/${p.connectionId}/remote/done`}>
+            <button type="submit" class="secondary" title="Tell the run to carry on">
+              Done
+            </button>
+          </form>
+          <CancelButton connectionId={p.connectionId} />
+        </div>
+      )}
+    </div>
+    {p.prompt ? (
+      <div id="remote" data-id={p.connectionId}>
+        <div class="mfa">
+          {p.prompt}
+          <br />
+          <small id="rstatus" class="muted">
+            Connecting…
+          </small>
+        </div>
+        <img id="screen" class="screen" tabindex={0} draggable={false} alt="Live view of the bank's page" />
+        <details id="rlogs" class="rlogs">
+          <summary>
+            <span class="button-like">Logs</span> run log, browser console and network calls
+          </summary>
+          <h3>Run log</h3>
+          <pre id="rlog-run" class="rlog" />
+          <h3>Browser console</h3>
+          <pre id="rlog-console" class="rlog" />
+          <h3>Network</h3>
+          <pre id="rlog-network" class="rlog" />
+        </details>
+      </div>
+    ) : (
+      <div class="card empty">Nothing is waiting for you in the browser right now.</div>
+    )}
+  </Layout>
 );
