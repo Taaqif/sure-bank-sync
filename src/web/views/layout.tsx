@@ -2,7 +2,13 @@ import { createContext, useContext, type Child } from "hono/jsx";
 import { raw } from "hono/html";
 
 /** Request-wide UI state every page can read (set in app.tsx). */
-export const UiContext = createContext({ dryRun: false, debugTools: false, auth: false });
+export const UiContext = createContext({
+  dryRun: false,
+  debugTools: false,
+  auth: false,
+  /** runs waiting for a person in the browser view */
+  needsBrowser: [] as { connectionId: string; prompt: string }[],
+});
 
 const CSS = `
 :root {
@@ -87,6 +93,11 @@ button.link:hover { color: var(--fg); }
 .toast.success { border-left-color: var(--ok); } .toast.failed { border-left-color: var(--bad); }
 @keyframes toast-in { from { transform: translateY(8px); opacity: 0; } }
 .hint.preview { display: block; min-height: 1.5em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cta { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin: 0 0 14px; padding: 12px 16px; border: 2px solid var(--warn); border-radius: 10px; background: color-mix(in srgb, var(--warn) 12%, var(--card)); animation: attention 1.6s ease-in-out 3; }
+.cta strong { color: var(--warn); }
+.cta small { display: block; color: var(--fg); margin-top: 2px; }
+.cta-btn { display: inline-block; padding: 9px 16px; border-radius: 8px; background: var(--warn); color: #fff; font-weight: 700; text-decoration: none; white-space: nowrap; }
+.cta-btn:hover { filter: brightness(1.1); }
 .needs:not(:empty) { border: 1px solid var(--warn); border-radius: 8px; padding: 10px 14px; margin: 8px 0; background: var(--card); }
 .live { display: inline-flex; align-items: center; gap: 5px; margin-left: 8px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--run); color: var(--run); font-size: 10px; font-weight: 700; letter-spacing: .06em; vertical-align: middle; }
 .live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: live-pulse 2.4s ease-in-out infinite; }
@@ -154,7 +165,74 @@ export function BareLayout(props: { title: string; children?: Child }) {
   );
 }
 
-export function Layout(props: { title?: string; nav?: Nav; msg?: string; error?: string; children?: Child; script?: string }) {
+/** "A run needs you in the browser" banner with a big button to the browser view. */
+export function NeedsBrowser(p: { items: { connectionId: string; prompt: string }[] }) {
+  return (
+    <>
+      {p.items.map((n) => (
+        <div class="cta">
+          <div>
+            <strong>Needs you in the browser</strong> · {n.connectionId}
+            <small>{n.prompt}</small>
+          </div>
+          <a class="cta-btn" href={`/connections/${encodeURIComponent(n.connectionId)}/remote`}>
+            Open browser view →
+          </a>
+        </div>
+      ))}
+    </>
+  );
+}
+
+/* Keeps the banner current on pages that don't reload themselves. */
+const NEEDS_JS = `
+(() => {
+  const box = document.getElementById("needs-browser");
+  if (!box) return;
+  let last = box.dataset.state || "";
+  async function poll() {
+    try {
+      const r = await fetch("/api/needs", { credentials: "same-origin" });
+      if (r.ok) {
+        const items = await r.json();
+        const state = JSON.stringify(items);
+        if (state !== last) {
+          last = state;
+          box.innerHTML = "";
+          for (const n of items) {
+            const div = document.createElement("div");
+            div.className = "cta";
+            const text = document.createElement("div");
+            const strong = document.createElement("strong");
+            strong.textContent = "Needs you in the browser";
+            const small = document.createElement("small");
+            small.textContent = n.prompt;
+            text.append(strong, " · " + n.connectionId, small);
+            const a = document.createElement("a");
+            a.className = "cta-btn";
+            a.href = "/connections/" + encodeURIComponent(n.connectionId) + "/remote";
+            a.textContent = "Open browser view →";
+            div.append(text, a);
+            box.append(div);
+          }
+        }
+      }
+    } catch {}
+    setTimeout(poll, document.hidden ? 10000 : 3000);
+  }
+  setTimeout(poll, 3000);
+})();`;
+
+export function Layout(props: {
+  title?: string;
+  nav?: Nav;
+  msg?: string;
+  error?: string;
+  children?: Child;
+  script?: string;
+  /** pages with their own "needs you" UI (dashboard, browser view) */
+  hideNeeds?: boolean;
+}) {
   const tab = (n: Nav, href: string, label: string) => (
     <a class={`tab${props.nav === n ? " on" : ""}`} href={href}>
       {label}
@@ -197,9 +275,15 @@ export function Layout(props: { title?: string; nav?: Nav; msg?: string; error?:
           <main>
             {props.msg && <div class={`flash${msgIsError ? " error" : ""}`}>{props.msg}</div>}
             {props.error && <div class="flash error">{props.error}</div>}
+            {!props.hideNeeds && (
+              <div id="needs-browser" data-state={JSON.stringify(ui.needsBrowser)}>
+                <NeedsBrowser items={ui.needsBrowser} />
+              </div>
+            )}
             {props.children}
           </main>
           <script dangerouslySetInnerHTML={{ __html: FRESH_JS }} />
+          {!props.hideNeeds && <script dangerouslySetInnerHTML={{ __html: NEEDS_JS }} />}
           {props.script && <script dangerouslySetInnerHTML={{ __html: props.script }} />}
         </body>
       </html>

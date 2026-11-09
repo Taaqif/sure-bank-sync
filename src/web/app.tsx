@@ -176,7 +176,17 @@ export function createApp(svc: Services) {
   const msgOf = (c: Context) => c.req.query("msg");
   const page = (c: Context, node: Child, status?: 200 | 400) =>
     c.html(
-      <UiContext.Provider value={{ dryRun: store.settings().dryRun, debugTools: DEBUG_TOOLS, auth: !!svc.admin }}>
+      <UiContext.Provider
+        value={{
+          dryRun: store.settings().dryRun,
+          debugTools: DEBUG_TOOLS,
+          auth: !!svc.admin,
+          needsBrowser: svc.mfa
+            .pending()
+            .filter((m) => m.kind === "browser")
+            .map((m) => ({ connectionId: m.connectionId, prompt: m.prompt })),
+        }}
+      >
         {node}
       </UiContext.Provider>,
       status,
@@ -234,6 +244,15 @@ export function createApp(svc: Services) {
   );
 
   // Live preview for the schedule picker.
+  app.get("/api/needs", (c) =>
+    c.json(
+      svc.mfa
+        .pending()
+        .filter((m) => m.kind === "browser")
+        .map((m) => ({ connectionId: m.connectionId, prompt: m.prompt })),
+    ),
+  );
+
   app.get("/api/cron-preview", (c) => {
     const s = store.settings();
     const tz = c.req.query("tz")?.trim() || s.timezone;
@@ -506,12 +525,7 @@ export function createApp(svc: Services) {
     const id = c.req.param("id");
     if (!store.connection(id)) return c.notFound();
     const ok = svc.runner.cancel(id);
-    let path = "/";
-    try {
-      const back = c.req.header("referer");
-      if (back) path = new URL(back).pathname;
-    } catch {}
-    return redirect(c, path, ok ? `Cancelling ${id}…` : `${id} isn't running`);
+    return redirect(c, `/connections/${id}#runs`, ok ? `Cancelled the run of ${id}` : `${id} isn't running`);
   });
 
   // --- remote browser view (a person solves a CAPTCHA etc.) ----------------

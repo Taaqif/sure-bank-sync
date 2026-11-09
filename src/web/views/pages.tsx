@@ -4,7 +4,7 @@ import type { ProviderDefinition } from "../../providers/index.js";
 import type { Connection, Settings, User } from "../../store.js";
 import type { SureAccount } from "../../sureClient.js";
 import { useContext } from "hono/jsx";
-import { BareLayout, Layout, UiContext } from "./layout.js";
+import { BareLayout, Layout, NeedsBrowser, UiContext } from "./layout.js";
 import { Badge, CredentialInputs, RunsTable, ago, formatWhen } from "./parts.js";
 import { LookbackField, SCHEDULE_JS, ScheduleField } from "./schedule.js";
 
@@ -98,14 +98,9 @@ export function DashboardStatus(p: DashboardProps) {
               {r.conn.userName} · {r.conn.id}
             </strong>{" "}
             {r.mfa!.kind === "browser" ? (
-              <>
-                needs you in the browser: {r.mfa!.prompt}
-                <div style="margin-top:8px">
-                  <a href={`/connections/${r.conn.id}/remote`}>
-                    <button type="button">Open browser</button>
-                  </a>
-                </div>
-              </>
+              <div style="margin-top:8px">
+                <NeedsBrowser items={[{ connectionId: r.conn.id, prompt: r.mfa!.prompt }]} />
+              </div>
             ) : (
               <>
                 needs a code: {r.mfa!.prompt}
@@ -258,7 +253,7 @@ updateTitle(prev);
 schedule();`;
 
 export const DashboardPage = (p: DashboardProps & { msg?: string }) => (
-  <Layout nav="dashboard" msg={p.msg} script={REFRESH_JS}>
+  <Layout nav="dashboard" msg={p.msg} script={REFRESH_JS} hideNeeds>
     <div id="status">
       <DashboardStatus {...p} />
     </div>
@@ -723,7 +718,7 @@ const RUN_LIVE_JS = `
         badge.textContent = d.status === "awaiting_mfa" ? "needs you" : d.status;
         stats.textContent = d.stats;
         needs.innerHTML = "";
-        if (d.needs) {
+        if (d.needs && d.needs.kind !== "browser") {
           const a = document.createElement("a");
           a.href = d.needs.kind === "browser" ? "/connections/" + encodeURIComponent(root.dataset.conn) + "/remote" : "/#needs-you";
           a.textContent = d.needs.kind === "browser" ? "Open browser" : "Enter code on the dashboard";
@@ -1038,7 +1033,7 @@ const REMOTE_JS = `
 })();`;
 
 export const RemotePage = (p: { connectionId: string; prompt?: string }) => (
-  <Layout title={`Browser · ${p.connectionId}`} nav="dashboard" script={p.prompt ? REMOTE_JS : undefined}>
+  <Layout title={`Browser · ${p.connectionId}`} nav="dashboard" hideNeeds script={p.prompt ? REMOTE_JS : undefined}>
     <div class="row between">
       <h2>
         <a href={`/connections/${p.connectionId}`}>{p.connectionId}</a> · browser
