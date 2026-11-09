@@ -20,7 +20,7 @@ import { join } from "node:path";
 import type { Locator, Page, Response } from "playwright";
 import { parseAmount, type BankAccount, type BankTransaction } from "../models.js";
 import { parseCsv } from "./csv.js";
-import { AuthError, ProviderError, captureJson, snapshot, type ProviderContext, type ProviderDefinition } from "./base.js";
+import { AuthError, ProviderError, captureJson, pause, settle, snapshot, type ProviderContext, type ProviderDefinition } from "./base.js";
 
 const LOGIN_URL = "https://www.americanexpress.com/en-au/account/login";
 const APP_HOST = "global.americanexpress.com";
@@ -55,13 +55,6 @@ const VERIFY_TEXT = /verify (it'?s|your identity)|one[- ]time (code|password)|ve
 const ERROR_TEXT = /(incorrect|invalid|doesn'?t match).*(user ?id|password)|(user ?id|password).*(incorrect|invalid)|account (is |has been )?locked|temporarily (locked|suspended)/i;
 /** how an identity-check option for sending a code tends to read */
 const SEND_CHOICE = /sms|text|e-?mail|call|phone|mobile|send|\*{2,}|•{2,}/i;
-
-const pause = (min: number, max: number) => new Promise((r) => setTimeout(r, min + Math.random() * (max - min)));
-
-async function settle(page: Page): Promise<void> {
-  await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
-  await pause(1200, 2200);
-}
 
 const visible = (l: Locator) => l.first().isVisible().catch(() => false);
 

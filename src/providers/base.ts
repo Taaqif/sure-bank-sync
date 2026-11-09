@@ -1,7 +1,7 @@
 /** Interface every bank provider implements. */
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { BrowserContext, Page } from "playwright";
+import type { BrowserContext, Page, Request } from "playwright";
 import type { BankAccount, BankTransaction } from "../models.js";
 
 /** Expected failure (bad password, site changed, locked out...). Shown as-is in the UI. */
@@ -32,6 +32,48 @@ export interface ProviderContext {
    * solve a CAPTCHA). Resolves when `until` returns true or they click Done.
    */
   requestBrowserHelp: (page: Page, prompt: string, until?: () => Promise<boolean>) => Promise<void>;
+}
+
+export const pause = (min: number, max: number) => new Promise((r) => setTimeout(r, min + Math.random() * (max - min)));
+
+/**
+ * Analytics, telemetry and bot-sensor calls that never stop on bank sites.
+ * Waiting for them to finish ("networkidle") always runs into the timeout.
+ */
+const BACKGROUND_TRAFFIC =
+  /beacon|analytics|collect|pixel|telemetry|metrics|tracking|tagging|consent|sumologic|dynatrace|omns\.|demdex|adobe|doubleclick|googletag|google-analytics|newrelic|nr-data|datadog|sentry|hotjar|akam\/|_sec\/|\/bf$|report\/errors|\/v4\/|\/MS-/i;
+
+/**
+ * Wait for the page to finish loading its own data: no page, XHR or fetch
+ * request in flight (ignoring background traffic) for `quietMs`, at most
+ * `maxMs`. Then a short human-like pause.
+ */
+export async function settle(page: Page, opts: { maxMs?: number; quietMs?: number } = {}): Promise<void> {
+  const maxMs = opts.maxMs ?? 8_000;
+  const quietMs = opts.quietMs ?? 500;
+  const deadline = Date.now() + maxMs;
+  const inflight = new Set<Request>();
+  const onStart = (r: Request) => {
+    if (["document", "xhr", "fetch"].includes(r.resourceType()) && !BACKGROUND_TRAFFIC.test(r.url())) inflight.add(r);
+  };
+  const onEnd = (r: Request) => inflight.delete(r);
+  page.on("request", onStart);
+  page.on("requestfinished", onEnd);
+  page.on("requestfailed", onEnd);
+  try {
+    await page.waitForLoadState("domcontentloaded", { timeout: maxMs }).catch(() => {});
+    let quietSince = Date.now();
+    while (Date.now() < deadline) {
+      if (inflight.size) quietSince = Date.now();
+      else if (Date.now() - quietSince >= quietMs) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  } finally {
+    page.off("request", onStart);
+    page.off("requestfinished", onEnd);
+    page.off("requestfailed", onEnd);
+  }
+  await pause(300, 700);
 }
 
 /** Save screenshot + HTML of every open page. Call liberally when debugging selectors. */

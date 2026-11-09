@@ -16,7 +16,7 @@ import { join } from "node:path";
 import type { BrowserContext, Download, Page } from "playwright";
 import { parseAmount, type BankAccount, type BankTransaction } from "../models.js";
 import { parseCsv, dmyDate as anzDate } from "./csv.js";
-import { AuthError, ProviderError, captureJson, snapshot, type ProviderContext, type ProviderDefinition } from "./base.js";
+import { AuthError, ProviderError, captureJson, pause, settle, snapshot, type ProviderContext, type ProviderDefinition } from "./base.js";
 
 const LOGIN_URL = "https://login.anz.com/internetbanking";
 const IB_HOST = /^banking\d*\.ib\.anz\.com$/;
@@ -126,13 +126,6 @@ export function daysBetween(since: string, until: string): number {
 }
 
 const LOGIN_TIMEOUT = 60_000;
-
-const pause = (min: number, max: number) => new Promise((r) => setTimeout(r, min + Math.random() * (max - min)));
-
-async function settle(page: Page): Promise<void> {
-  await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
-  await pause(1500, 2500);
-}
 
 export const anz: ProviderDefinition = {
   name: "anz",
