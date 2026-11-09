@@ -370,6 +370,9 @@ export class Runner {
     const display = debug ? null : await virtualDisplay();
     rlog(`browser: ${debug ? "visible window" : display ? "window on virtual screen" : "headless (Xvfb not available)"}`);
     const browser = await chromium.launchPersistentContext(profile, {
+      // Full Chromium for every mode, also headless ("new headless"): it's the
+      // only browser in the Docker image, and banks treat it like normal Chrome.
+      channel: "chromium",
       headless: !debug && !display,
       env: display ? { ...process.env, DISPLAY: display } : undefined,
       slowMo: debug ? Number(process.env.SURE_SYNC_SLOWMO ?? 150) : undefined,
