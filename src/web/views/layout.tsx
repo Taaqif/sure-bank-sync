@@ -66,6 +66,10 @@ pre { background: var(--card); border: 1px solid var(--line); border-radius: 8px
 .logs .l-WARN { color: var(--warn); } .logs .l-ERROR { color: var(--bad); } .logs .l-DEBUG { color: var(--muted); }
 .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 10px 12px; }
 .toolbar input, .toolbar select { width: auto; }
+.schedule { display: grid; gap: 6px; }
+.schedule .row { flex-wrap: wrap; }
+.cron-line { display: flex !important; gap: 8px; align-items: center; font-weight: 400 !important; }
+.cron-line input { font-family: ui-monospace, monospace; font-size: 12px; max-width: 220px; }
 .shots img { max-width: 100%; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 12px; }
 `;
 

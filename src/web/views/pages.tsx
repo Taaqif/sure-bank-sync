@@ -6,6 +6,7 @@ import type { SureAccount } from "../../sureClient.js";
 import { useContext } from "hono/jsx";
 import { Layout, UiContext } from "./layout.js";
 import { Badge, CredentialInputs, RunsTable, ago, formatWhen } from "./parts.js";
+import { LookbackField, SCHEDULE_JS, ScheduleField } from "./schedule.js";
 
 // --- dashboard -------------------------------------------------------------
 
@@ -16,6 +17,8 @@ export interface ConnectionRow {
   last?: Run;
   lastOk?: Run;
   nextRun: Date | null;
+  /** e.g. "Daily at 06:00 · last 14 days" */
+  scheduleLabel: string;
   mfa?: MfaRequest;
   unmapped: number;
 }
@@ -102,7 +105,11 @@ export function DashboardStatus(p: DashboardProps) {
                 <td><StatusCell r={r} /></td>
                 <td>{ago(r.last?.startedAt)}</td>
                 <td>{ago(r.lastOk?.finishedAt)}</td>
-                <td class="muted">{formatWhen(r.nextRun, p.settings.timezone)}</td>
+                <td class="muted">
+                  {formatWhen(r.nextRun, p.settings.timezone)}
+                  <br />
+                  <small>{r.scheduleLabel}</small>
+                </td>
                 <td>{r.last ? `${r.last.created} / ${r.last.fetched}` : ""}</td>
                 <td>
                   <form method="post" action={`/connections/${r.conn.id}/run`}>
@@ -146,7 +153,7 @@ export const DashboardPage = (p: DashboardProps & { msg?: string }) => (
 // --- settings --------------------------------------------------------------
 
 export const SettingsPage = (p: { s: Settings; msg?: string; error?: string }) => (
-  <Layout title="Settings" nav="settings" msg={p.msg} error={p.error}>
+  <Layout title="Settings" nav="settings" msg={p.msg} error={p.error} script={SCHEDULE_JS}>
     <h2>Settings</h2>
     <div class="card">
       <form class="stack" method="post" action="/settings">
@@ -160,16 +167,8 @@ export const SettingsPage = (p: { s: Settings; msg?: string; error?: string }) =
           <input type="text" name="timezone" value={p.s.timezone} required />
           <small>Used for schedules and "today", e.g. Australia/Melbourne.</small>
         </label>
-        <label>
-          Default schedule (cron)
-          <input type="text" name="schedule" value={p.s.schedule} required />
-          <small>minute hour day month weekday. "0 6 * * *" = 6am daily. Connections can override.</small>
-        </label>
-        <label>
-          Lookback days
-          <input type="number" name="lookbackDays" value={String(p.s.lookbackDays)} min="1" max="365" required />
-          <small>How far back each run fetches. Already-synced transactions are skipped.</small>
-        </label>
+        <ScheduleField name="schedule" label="Default schedule" value={p.s.schedule} />
+        <LookbackField name="lookbackDays" value={p.s.lookbackDays} />
         <label>
           MFA timeout (seconds)
           <input type="number" name="mfaTimeoutSeconds" value={String(p.s.mfaTimeoutSeconds)} min="30" max="3600" required />
@@ -307,24 +306,18 @@ export const UserPage = (p: { user: User; conns: Connection[]; msg?: string }) =
 
 // --- connections -----------------------------------------------------------
 
-function AdvancedFields(p: { conn?: Connection; settings: Settings }) {
+function ScheduleFields(p: { conn?: Connection; settings: Settings }) {
   return (
     <>
-      <label>
-        Schedule override (cron)
-        <input type="text" name="schedule" value={p.conn?.schedule ?? ""} placeholder={`default: ${p.settings.schedule}`} />
-      </label>
-      <label>
-        Lookback days override
-        <input
-          type="number"
-          name="lookbackDays"
-          value={p.conn?.lookbackDays ? String(p.conn.lookbackDays) : ""}
-          min="1"
-          max="365"
-          placeholder={`default: ${p.settings.lookbackDays}`}
-        />
-      </label>
+      <ScheduleField name="schedule" label="Schedule" value={p.conn?.schedule ?? null} defaultCron={p.settings.schedule} />
+      <LookbackField name="lookbackDays" value={p.conn?.lookbackDays ?? null} defaultDays={p.settings.lookbackDays} />
+    </>
+  );
+}
+
+function AdvancedFields(p: { conn?: Connection }) {
+  return (
+    <>
       <label>
         Options (JSON)
         <textarea name="options">{JSON.stringify(p.conn?.options ?? {})}</textarea>
@@ -342,7 +335,7 @@ export const ConnectionNewPage = (p: {
   settings: Settings;
   msg?: string;
 }) => (
-  <Layout title="Add connection" nav="dashboard" msg={p.msg}>
+  <Layout title="Add connection" nav="dashboard" msg={p.msg} script={SCHEDULE_JS}>
     <h2>Add bank connection</h2>
     {!p.users.length ? (
       <div class="flash error">
@@ -382,10 +375,11 @@ export const ConnectionNewPage = (p: {
           <label class="check">
             <input type="checkbox" name="enabled" checked /> Run on schedule
           </label>
+          <ScheduleFields settings={p.settings} />
           <details>
             <summary>Advanced</summary>
             <div class="stack" style="padding:12px 0 0">
-              <AdvancedFields settings={p.settings} />
+              <AdvancedFields />
             </div>
           </details>
           <div>
@@ -412,7 +406,7 @@ export const ConnectionPage = (p: {
   const known = new Set(p.sureAccounts.map((a) => a.id));
   const ui = useContext(UiContext);
   return (
-    <Layout title={p.conn.id} nav="dashboard" msg={p.msg}>
+    <Layout title={p.conn.id} nav="dashboard" msg={p.msg} script={SCHEDULE_JS}>
       <div class="row between">
         <h2>
           {p.conn.userName} · {p.conn.id} <span class="muted">({p.provider?.label ?? p.conn.provider})</span>
@@ -497,7 +491,13 @@ export const ConnectionPage = (p: {
           <label class="check">
             <input type="checkbox" name="enabled" checked={p.conn.enabled} /> Run on schedule
           </label>
-          <AdvancedFields conn={p.conn} settings={p.settings} />
+          <ScheduleFields conn={p.conn} settings={p.settings} />
+          <details>
+            <summary>Advanced</summary>
+            <div class="stack" style="padding:12px 0 0">
+              <AdvancedFields conn={p.conn} />
+            </div>
+          </details>
           <div>
             <button type="submit">Save</button>
           </div>

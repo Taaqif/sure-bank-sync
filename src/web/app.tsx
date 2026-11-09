@@ -7,6 +7,7 @@ import { logger, tailLog } from "../log.js";
 import type { MfaBroker } from "../mfa.js";
 import { PROVIDERS } from "../providers/index.js";
 import { DEBUG_TOOLS, type Runner } from "../runner.js";
+import { describeCron, nextRuns } from "../schedule.js";
 import type { RunStore } from "../runs.js";
 import type { Scheduler } from "../scheduler.js";
 import { ValidationError, type ConfigStore, type ConnectionInput } from "../store.js";
@@ -116,7 +117,11 @@ export function createApp(svc: Services) {
   };
 
   function connectionRows(): ConnectionRow[] {
+    const s = store.settings();
     return store.connections().map((conn) => ({
+      scheduleLabel: conn.enabled
+        ? `${describeCron(conn.schedule ?? s.schedule)} · last ${conn.lookbackDays ?? s.lookbackDays} days`
+        : "not scheduled",
       conn,
       providerLabel: PROVIDERS[conn.provider]?.label ?? conn.provider,
       running: svc.runner.isRunning(conn.id),
@@ -156,6 +161,22 @@ export function createApp(svc: Services) {
       })),
     ),
   );
+
+  // Live preview for the schedule picker.
+  app.get("/api/cron-preview", (c) => {
+    const s = store.settings();
+    const tz = c.req.query("tz")?.trim() || s.timezone;
+    const expr = (c.req.query("cron") ?? "").trim();
+    try {
+      const fmt = new Intl.DateTimeFormat("en-AU", {
+        timeZone: tz, weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false,
+      });
+      if (expr.split(/\s+/).length !== 5) throw new Error("cron needs 5 fields: minute hour day month weekday");
+      return c.json({ ok: true, description: describeCron(expr), next: nextRuns(expr, tz, 3).map((d) => fmt.format(d)) });
+    } catch (e) {
+      return c.json({ ok: false, error: (e as Error).message });
+    }
+  });
 
   // --- settings -------------------------------------------------------------
   app.get("/settings", (c) => page(c, <SettingsPage s={store.settings()} msg={msgOf(c)} />));

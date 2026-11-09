@@ -35,6 +35,10 @@ cron (per connection) → Playwright logs into bank → fetch transactions
   of duplicating), so re-runs and overlapping lookback windows are safe.
 - **Dry run / Discover accounts**: dry runs log every row they would import
   and write nothing; Discover accounts only lists accounts for mapping.
+- **Schedule and sync period** are set in the UI: pick hourly / every few
+  hours / daily / weekdays / weekly (or type a cron) with a preview of the
+  next runs, and how many days of history each run fetches. Both have a
+  default in Settings and an optional per-connection override.
 - **MFA**: when a bank asks for a code the run pauses and the dashboard shows
   an input box.
 - **Remembered device**: each connection keeps its own browser profile in
