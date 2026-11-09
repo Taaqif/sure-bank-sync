@@ -1,0 +1,53 @@
+/** Hand-off for one-time codes: a scraper waits, a human types it into the web UI. */
+
+export class MfaTimeout extends Error {}
+
+export interface MfaRequest {
+  connectionId: string;
+  runId: number;
+  prompt: string;
+  createdAt: Date;
+}
+
+interface Pending extends MfaRequest {
+  resolve: (code: string) => void;
+}
+
+export class MfaBroker {
+  readonly #pending = new Map<string, Pending>();
+
+  get(connectionId: string): MfaRequest | undefined {
+    return this.#pending.get(connectionId);
+  }
+
+  pending(): MfaRequest[] {
+    return [...this.#pending.values()];
+  }
+
+  request(connectionId: string, runId: number, prompt: string, timeoutMs: number): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.#pending.delete(connectionId);
+        reject(new MfaTimeout(`no MFA code entered within ${Math.round(timeoutMs / 1000)}s`));
+      }, timeoutMs);
+      this.#pending.set(connectionId, {
+        connectionId,
+        runId,
+        prompt,
+        createdAt: new Date(),
+        resolve: (code) => {
+          clearTimeout(timer);
+          this.#pending.delete(connectionId);
+          resolve(code);
+        },
+      });
+    });
+  }
+
+  submit(connectionId: string, code: string): boolean {
+    const p = this.#pending.get(connectionId);
+    if (!p) return false;
+    p.resolve(code.trim());
+    return true;
+  }
+}

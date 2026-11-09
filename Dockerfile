@@ -1,40 +1,35 @@
-FROM python:3.12-slim-bookworm
-
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
-    UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy \
-    UV_PROJECT_ENVIRONMENT=/opt/venv \
-    PATH="/opt/venv/bin:$PATH"
-
-COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /usr/local/bin/uv
-
+# Playwright image ships Node + Chromium + system libs. Tag must match the
+# "playwright" version in package.json exactly.
+FROM mcr.microsoft.com/playwright:v1.65.0-noble AS base
 WORKDIR /app
+ENV NODE_ENV=production
 
-# Dependencies first for layer caching
-COPY pyproject.toml uv.lock* ./
-RUN uv sync --no-dev --no-install-project
-
-# Chromium + its system libs (matches installed playwright version)
-RUN playwright install --with-deps chromium \
+FROM base AS build
+# compiler for better-sqlite3 when no prebuilt binary matches this Node version
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
     && rm -rf /var/lib/apt/lists/*
-
+COPY package.json package-lock.json ./
+RUN npm ci --include=dev
+COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
-RUN uv sync --no-dev
+RUN npm run build && npm prune --omit=dev
 
-RUN useradd --create-home --uid 1000 app \
-    && mkdir -p /data \
-    && chown -R app:app /data /ms-playwright
-USER app
+FROM base
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+COPY drizzle ./drizzle
+COPY package.json ./
 
-ENV SURE_SYNC_CONFIG=/config/config.yaml \
-    SURE_SYNC_DATA_DIR=/data
+RUN mkdir -p /data && chown pwuser:pwuser /data
+USER pwuser
 
+ENV SURE_SYNC_DATA_DIR=/data \
+    SURE_SYNC_PORT=8686 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 VOLUME ["/data"]
 EXPOSE 8686
 
 HEALTHCHECK --interval=60s --timeout=5s --start-period=20s \
-    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8686/healthz').status==200 else 1)"
+  CMD node -e "fetch('http://127.0.0.1:8686/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-CMD ["sure-bank-sync"]
+ENTRYPOINT ["node", "dist/main.js"]

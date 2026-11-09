@@ -1,7 +1,5 @@
 .env
-config/config.yaml
 data/
-__pycache__/
-*.pyc
-.venv/
-.pytest_cache/
+node_modules/
+dist/
+*.log

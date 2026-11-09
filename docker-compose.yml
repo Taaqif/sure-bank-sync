@@ -10,10 +10,12 @@ services:
     environment:
       TZ: ${TZ:-Australia/Melbourne}
     volumes:
-      - ./config:/config:ro
       - sure-sync-data:/data
     # Chromium needs more shared memory than Docker's 64MB default
     shm_size: "1gb"
+    # Lets the Sure URL setting use http://host.docker.internal:<port> when Sure runs on the host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # If Sure runs in another compose project, join its network instead:
     # networks: [sure]
 
