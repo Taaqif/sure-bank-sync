@@ -1,5 +1,5 @@
 import type { SyncPeriod } from "../../providers/base.js";
-import { EVERY_HOURS, WEEKDAYS, describeCron, parseCron, type ScheduleMode } from "../../schedule.js";
+import { EVERY_HOURS, WEEKDAYS, cronPreview, cronPreviewText, describeCron, parseCron, type ScheduleMode } from "../../schedule.js";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -7,7 +7,7 @@ const pad = (n: number) => String(n).padStart(2, "0");
  * Schedule picker. Posts a cron string as `name`; "" means "use default"
  * when `defaultCron` is given (connection override).
  */
-export function ScheduleField(p: { name: string; label: string; value: string | null; defaultCron?: string; hint?: string }) {
+export function ScheduleField(p: { name: string; label: string; value: string | null; defaultCron?: string; timezone: string }) {
   const useDefault = p.defaultCron !== undefined && !p.value;
   const spec = parseCron(p.value || p.defaultCron || "0 6 * * *");
   const mode: ScheduleMode | "default" = useDefault ? "default" : spec.mode;
@@ -21,6 +21,8 @@ export function ScheduleField(p: { name: string; label: string; value: string | 
     ["weekly", "Weekly"],
     ["custom", "Custom (cron)"],
   );
+  // Hidden server-side too, so the script doesn't shift the layout on load.
+  const hide = (modes: string) => (modes.split(" ").includes(mode) ? "" : "display:none;");
   return (
     <div class="schedule" data-schedule data-default={p.defaultCron ?? ""}>
       <label>
@@ -33,24 +35,24 @@ export function ScheduleField(p: { name: string; label: string; value: string | 
               </option>
             ))}
           </select>
-          <select data-s="every" data-show="every" style="width:auto">
+          <select data-s="every" data-show="every" style={`${hide("every")}width:auto`}>
             {EVERY_HOURS.map((h) => (
               <option value={String(h)} selected={h === spec.everyHours}>
                 every {h} hours
               </option>
             ))}
           </select>
-          <select data-s="weekday" data-show="weekly" style="width:auto">
+          <select data-s="weekday" data-show="weekly" style={`${hide("weekly")}width:auto`}>
             {WEEKDAYS.map((d, i) => (
               <option value={String(i)} selected={i === spec.weekday}>
                 on {d}
               </option>
             ))}
           </select>
-          <span data-show="daily weekdays weekly" class="row">
+          <span data-show="daily weekdays weekly" class="row" style={hide("daily weekdays weekly")}>
             at <input type="time" data-s="time" value={`${pad(spec.hour)}:${pad(spec.minute)}`} style="width:auto" />
           </span>
-          <span data-show="hourly every" class="row">
+          <span data-show="hourly every" class="row" style={hide("hourly every")}>
             at minute <input type="number" data-s="minute" min="0" max="59" value={String(spec.minute)} style="width:5em" />
           </span>
         </div>
@@ -59,8 +61,9 @@ export function ScheduleField(p: { name: string; label: string; value: string | 
         <small>cron</small>
         <input type="text" name={p.name} value={useDefault ? "" : spec.cron} data-s="cron" placeholder={p.defaultCron ?? ""} />
       </label>
-      <small class="hint" data-s="preview">
-        {p.hint ?? ""}
+      {/* Rendered with the page (and a fixed height) so it doesn't shift the layout when it updates. */}
+      <small class="hint preview" data-s="preview" >
+        {cronPreviewText(cronPreview(p.value || p.defaultCron || "", p.timezone))}
       </small>
     </div>
   );
@@ -143,6 +146,7 @@ document.querySelectorAll("[data-schedule]").forEach((box) => {
       try {
         const r = await (await fetch("/api/cron-preview?" + q, { credentials: "same-origin" })).json();
         preview.textContent = r.ok ? r.description + " · next: " + r.next.join(", ") : "⚠ " + r.error;
+        preview.title = preview.textContent;
         preview.style.color = r.ok ? "" : "var(--bad)";
       } catch {}
     }, 250);
@@ -150,5 +154,6 @@ document.querySelectorAll("[data-schedule]").forEach((box) => {
   box.querySelectorAll("select, input:not([data-s=cron])").forEach((el) => el.addEventListener("input", () => refresh(false)));
   cron.addEventListener("input", () => { mode.value = "custom"; refresh(true); });
   if (tzInput) tzInput.addEventListener("change", () => refresh(true));
-  refresh(true);
+  // The server already rendered the preview: just set up visibility, no fetch.
+  show();
 });`;

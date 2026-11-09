@@ -98,3 +98,23 @@ export function nextRuns(expr: string, timezone: string, n = 3, from?: Date): Da
     job.stop();
   }
 }
+
+export type CronPreview = { ok: true; description: string; next: string[] } | { ok: false; error: string };
+
+/** "Daily at 06:00" + the next 3 run times formatted in `timezone`. */
+export function cronPreview(expr: string, timezone: string): CronPreview {
+  try {
+    const fmt = new Intl.DateTimeFormat("en-AU", {
+      timeZone: timezone, weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false,
+    });
+    if (expr.trim().split(/\s+/).length !== 5) throw new Error("cron needs 5 fields: minute hour day month weekday");
+    return { ok: true, description: describeCron(expr), next: nextRuns(expr, timezone, 3).map((d) => fmt.format(d)) };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+/** The one-line preview shown under the schedule picker (same text server and client side). */
+export function cronPreviewText(p: CronPreview): string {
+  return p.ok ? `${p.description} · next: ${p.next.join(", ")}` : `⚠ ${p.error}`;
+}

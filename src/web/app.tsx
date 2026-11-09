@@ -10,7 +10,7 @@ import { logger, tailLog } from "../log.js";
 import type { MfaBroker } from "../mfa.js";
 import { PROVIDERS, syncLabel } from "../providers/index.js";
 import { DEBUG_TOOLS, type Runner } from "../runner.js";
-import { describeCron, nextRuns } from "../schedule.js";
+import { cronPreview, describeCron } from "../schedule.js";
 import type { RunStore } from "../runs.js";
 import type { Scheduler } from "../scheduler.js";
 import { ValidationError, type ConfigStore, type ConnectionInput } from "../store.js";
@@ -28,6 +28,7 @@ import {
   DashboardStatus,
   RemotePage,
   RunPage,
+  runStats,
   SettingsPage,
   UserPage,
   UsersPage,
@@ -236,16 +237,7 @@ export function createApp(svc: Services) {
   app.get("/api/cron-preview", (c) => {
     const s = store.settings();
     const tz = c.req.query("tz")?.trim() || s.timezone;
-    const expr = (c.req.query("cron") ?? "").trim();
-    try {
-      const fmt = new Intl.DateTimeFormat("en-AU", {
-        timeZone: tz, weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false,
-      });
-      if (expr.split(/\s+/).length !== 5) throw new Error("cron needs 5 fields: minute hour day month weekday");
-      return c.json({ ok: true, description: describeCron(expr), next: nextRuns(expr, tz, 3).map((d) => fmt.format(d)) });
-    } catch (e) {
-      return c.json({ ok: false, error: (e as Error).message });
-    }
+    return c.json(cronPreview((c.req.query("cron") ?? "").trim(), tz));
   });
 
   // --- settings -------------------------------------------------------------
@@ -618,6 +610,22 @@ export function createApp(svc: Services) {
     const files = await readdir(join(svc.dataDir, "debug", `run-${run.id}`)).catch(() => [] as string[]);
     const logs = ["console.txt", "network.txt"].filter((f) => files.includes(f));
     return page(c, <RunPage run={run} shots={files.filter((f) => f.endsWith(".png")).sort()} logs={logs} msg={msgOf(c)} />);
+  });
+
+  // Live run page: log lines after `from`, status and counts.
+  app.get("/api/runs/:id{[0-9]+}", (c) => {
+    const run = runs.get(Number(c.req.param("id")));
+    if (!run) return c.json({ error: "not_found" }, 404);
+    const from = Math.max(0, Number(c.req.query("from")) || 0);
+    const needs = svc.mfa.get(run.connectionId);
+    return c.json({
+      status: run.status,
+      finished: run.status !== "running" && run.status !== "awaiting_mfa",
+      log: run.log.slice(from),
+      logLength: run.log.length,
+      stats: runStats(run),
+      needs: needs && needs.runId === run.id ? { kind: needs.kind, prompt: needs.prompt } : null,
+    });
   });
 
   app.get("/runs/:id{[0-9]+}/debug/:name", async (c) => {

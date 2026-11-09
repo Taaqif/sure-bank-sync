@@ -240,4 +240,21 @@ describe("web", () => {
     const log = await (await get(app, `/runs/${runId}/debug/console.txt`)).text();
     expect(log).toContain("warning demo: login service unavailable");
   }, 30_000);
+
+  it("serves only new log lines for the live run page", async () => {
+    const env = setup();
+    const { app } = makeApp(env);
+    const id = env.runs.start("alice-anz", "alice", "manual");
+    env.runs.appendLog(id, "10:00:00 one");
+    const first = (await (await get(app, `/api/runs/${id}?from=0`)).json()) as any;
+    expect(first).toMatchObject({ status: "running", finished: false, log: "10:00:00 one\n" });
+    expect(await (await get(app, `/runs/${id}`)).text()).toContain(`class="live"`);
+    env.runs.appendLog(id, "10:00:01 two");
+    const next = (await (await get(app, `/api/runs/${id}?from=${first.logLength}`)).json()) as any;
+    expect(next.log).toBe("10:00:01 two\n");
+    env.runs.finish(id, "success", { fetched: 3, created: 2, skipped: 1, unmapped: 0 });
+    const done = (await (await get(app, `/api/runs/${id}?from=0`)).json()) as any;
+    expect(done).toMatchObject({ finished: true, stats: "fetched 3 · new 2 · already synced 1 · unmapped 0" });
+    expect(await (await get(app, `/runs/${id}`)).text()).not.toContain(`class="live"`);
+  });
 });

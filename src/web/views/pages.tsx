@@ -39,8 +39,24 @@ function SetupHint({ settings, hasUsers, rows }: DashboardProps) {
   return null;
 }
 
+/** "LIVE" badge: this part of the page refreshes itself. */
+export const LiveBadge = (p: { id?: string; title?: string; hidden?: boolean }) => (
+  <span id={p.id} class="live" title={p.title ?? "Updating live"} style={p.hidden ? "display:none" : undefined}>
+    LIVE
+  </span>
+);
+
+/** "18:35:30 amex: opening Recent Transactions" -> "amex: opening Recent Transactions" */
+function currentStep(log: string | undefined): string {
+  const line = (log ?? "").trimEnd().split("\n").at(-1) ?? "";
+  const text = line.replace(/^\d{1,2}:\d{2}:\d{2}\s+/, "");
+  return text.length > 70 ? `${text.slice(0, 69)}…` : text;
+}
+
+/** Live state for the dashboard script: needs_you / running / idle. */
+const rowState = (r: ConnectionRow) => (r.mfa ? "needs_you" : r.running ? "running" : "idle");
+
 function StatusCell({ r }: { r: ConnectionRow }) {
-  if (!r.conn.enabled) return <Badge status="disabled" />;
   if (r.mfa) {
     return (
       <a href={r.mfa.kind === "browser" ? `/connections/${r.conn.id}/remote` : "#needs-you"}>
@@ -48,7 +64,18 @@ function StatusCell({ r }: { r: ConnectionRow }) {
       </a>
     );
   }
-  if (r.running) return <Badge status="running" />;
+  if (r.running) {
+    const step = r.last?.status === "running" ? currentStep(r.last.log) : "";
+    return (
+      <>
+        <a href={r.last ? `/runs/${r.last.id}` : "#"}>
+          <Badge status="running" label="running…" />
+        </a>
+        {step && <div class="step">{step}</div>}
+      </>
+    );
+  }
+  if (!r.conn.enabled && !r.last) return <Badge status="disabled" />;
   if (r.last)
     return (
       <a href={`/runs/${r.last.id}`}>
@@ -66,7 +93,7 @@ export function DashboardStatus(p: DashboardProps) {
       {p.rows
         .filter((r) => r.mfa)
         .map((r) => (
-          <div class="mfa">
+          <div class="mfa attention" id="needs-you">
             <strong>
               {r.conn.userName} · {r.conn.id}
             </strong>{" "}
@@ -92,7 +119,10 @@ export function DashboardStatus(p: DashboardProps) {
         ))}
 
       <div class="row between">
-        <h2>Connections</h2>
+        <h2>
+          Connections
+          <LiveBadge title="Updating live" />
+        </h2>
         {p.hasUsers && (
           <a href="/connections/new">
             <button type="button">Add connection</button>
@@ -104,10 +134,18 @@ export function DashboardStatus(p: DashboardProps) {
           <table>
             <tr>
               <th>Person</th><th>Connection</th><th>Bank</th><th>Status</th><th>Last run</th>
-              <th>Last success</th><th>Next run</th><th>New / fetched</th><th></th>
+              <th>Last success</th><th>Next run</th><th></th>
             </tr>
             {p.rows.map((r) => (
-              <tr>
+              <tr
+                data-conn={r.conn.id}
+                data-state={rowState(r)}
+                data-run={r.last ? String(r.last.id) : ""}
+                data-status={r.last?.status ?? ""}
+                data-created={r.last ? String(r.last.created) : ""}
+                data-dry={r.last?.dryRun ? "1" : ""}
+                data-error={r.last?.error ?? ""}
+              >
                 <td>{r.conn.userName}</td>
                 <td>
                   <a href={`/connections/${r.conn.id}`}>{r.conn.id}</a>
@@ -129,7 +167,6 @@ export function DashboardStatus(p: DashboardProps) {
                   <br />
                   <small>{r.scheduleLabel}</small>
                 </td>
-                <td>{r.last ? `${r.last.created} / ${r.last.fetched}` : ""}</td>
                 <td>
                   {r.running ? (
                     <CancelButton connectionId={r.conn.id} />
@@ -147,29 +184,85 @@ export function DashboardStatus(p: DashboardProps) {
         )}
       </div>
 
-      <h2>Recent runs</h2>
+      <h2>
+        Recent runs
+        <LiveBadge />
+      </h2>
       <RunsTable runs={p.runs} />
     </>
   );
 }
 
-// Refresh status every 5s, but never while someone is typing an MFA code.
+/*
+ * Live dashboard: refresh fast while something is running or waiting on you
+ * (2s), slowly when idle (10s) or in a background tab (15s, so the tab title
+ * still flags pending actions). Never refresh while someone is typing a code.
+ * Shows a toast when a run finishes and puts "action needed" in the title.
+ */
 const REFRESH_JS = `
-setInterval(async () => {
-  const el = document.getElementById("status");
+const el = document.getElementById("status");
+const toasts = document.getElementById("toasts");
+const baseTitle = document.title;
+let prev = snapshot();
+let timer;
+
+function snapshot() {
+  const m = new Map();
+  el.querySelectorAll("tr[data-conn]").forEach((tr) => m.set(tr.dataset.conn, { ...tr.dataset }));
+  return m;
+}
+function busy(snap) { return [...snap.values()].some((r) => r.state !== "idle"); }
+function updateTitle(snap) {
+  const n = [...snap.values()].filter((r) => r.state === "needs_you").length;
+  document.title = (n ? "⚠ " + n + " action needed · " : busy(snap) ? "⟳ " : "") + baseTitle;
+}
+function toast(conn, r) {
+  const ok = r.status === "success";
+  const t = document.createElement("a");
+  t.className = "toast " + (r.status || "");
+  t.href = "/runs/" + r.run;
+  const what = r.status === "success"
+    ? (r.dry ? "dry run done: " + r.created + " would be sent" : "done: " + r.created + " new")
+    : r.status === "cancelled" ? "cancelled" : "failed" + (r.error ? ": " + r.error : "");
+  t.textContent = conn + " " + what;
+  toasts.appendChild(t);
+  setTimeout(() => t.remove(), ok ? 8000 : 20000);
+}
+function diff(now) {
+  for (const [conn, r] of now) {
+    const before = prev.get(conn);
+    if (!before) continue;
+    if (r.state === "idle" && r.run && (before.state !== "idle" || before.run !== r.run) && r.status !== "running") toast(conn, r);
+    if (r.state === "needs_you" && before.state !== "needs_you") document.getElementById("needs-you")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  prev = now;
+}
+async function refreshStatus() {
   const typing = [...el.querySelectorAll("input")].some(i => i.value || i === document.activeElement);
-  if (typing) return;
-  try {
-    const r = await fetch("/partials/status", { credentials: "same-origin" });
-    if (r.ok) el.innerHTML = await r.text();
-  } catch {}
-}, 5000);`;
+  if (!typing) {
+    try {
+      const r = await fetch("/partials/status", { credentials: "same-origin" });
+      if (r.ok) { el.innerHTML = await r.text(); diff(snapshot()); }
+    } catch {}
+  }
+  updateTitle(prev);
+  schedule();
+}
+function schedule() {
+  clearTimeout(timer);
+  timer = setTimeout(refreshStatus, document.hidden ? 15000 : busy(prev) ? 2000 : 10000);
+}
+window.refreshLive = refreshStatus;
+// Pressing Run now / Cancel reloads the page; check again soon after.
+updateTitle(prev);
+schedule();`;
 
 export const DashboardPage = (p: DashboardProps & { msg?: string }) => (
   <Layout nav="dashboard" msg={p.msg} script={REFRESH_JS}>
     <div id="status">
       <DashboardStatus {...p} />
     </div>
+    <div id="toasts" class="toasts" aria-live="polite" />
   </Layout>
 );
 
@@ -190,7 +283,7 @@ export const SettingsPage = (p: { s: Settings; msg?: string; error?: string }) =
           <input type="text" name="timezone" value={p.s.timezone} required />
           <small>Used for schedules and "today", e.g. Australia/Melbourne.</small>
         </label>
-        <ScheduleField name="schedule" label="Default schedule" value={p.s.schedule} />
+        <ScheduleField name="schedule" label="Default schedule" value={p.s.schedule} timezone={p.s.timezone} />
         <label>
           MFA timeout (seconds)
           <input type="number" name="mfaTimeoutSeconds" value={String(p.s.mfaTimeoutSeconds)} min="30" max="3600" required />
@@ -339,7 +432,13 @@ export const UserPage = (p: { user: User; conns: Connection[]; msg?: string }) =
 function ScheduleFields(p: { conn?: Connection; settings: Settings; provider?: ProviderDefinition }) {
   return (
     <>
-      <ScheduleField name="schedule" label="Schedule" value={p.conn?.schedule ?? null} defaultCron={p.settings.schedule} />
+      <ScheduleField
+        name="schedule"
+        label="Schedule"
+        value={p.conn?.schedule ?? null}
+        defaultCron={p.settings.schedule}
+        timezone={p.settings.timezone}
+      />
       {p.provider && <LookbackField name="lookbackDays" value={p.conn?.lookbackDays ?? null} period={p.provider.syncPeriod} />}
     </>
   );
@@ -558,13 +657,66 @@ export const CancelButton = (p: { connectionId: string }) => (
   </form>
 );
 
+/*
+ * While a run is in progress, poll for new log lines (only the part not yet
+ * shown), status and counts. Keeps following the log if you're scrolled to
+ * the bottom. Reloads once when the run ends, to show screenshots and logs.
+ */
+const RUN_LIVE_JS = `
+(() => {
+  const root = document.getElementById("run");
+  const pre = document.getElementById("run-log");
+  const badge = document.getElementById("run-badge");
+  const stats = document.getElementById("run-stats");
+  const needs = document.getElementById("run-needs");
+  let offset = Number(root.dataset.logLength);
+  let timer;
+  const atBottom = () => window.innerHeight + window.scrollY >= document.body.scrollHeight - 60;
+  async function poll() {
+    try {
+      const r = await fetch("/api/runs/" + root.dataset.id + "?from=" + offset, { credentials: "same-origin" });
+      if (r.ok) {
+        const d = await r.json();
+        const follow = atBottom();
+        if (d.log) {
+          if (pre.dataset.empty) { pre.textContent = ""; delete pre.dataset.empty; }
+          pre.textContent += d.log;
+          offset = d.logLength;
+        }
+        badge.className = "badge " + d.status;
+        badge.textContent = d.status === "awaiting_mfa" ? "needs you" : d.status;
+        stats.textContent = d.stats;
+        needs.innerHTML = "";
+        if (d.needs) {
+          const a = document.createElement("a");
+          a.href = d.needs.kind === "browser" ? "/connections/" + encodeURIComponent(root.dataset.conn) + "/remote" : "/#needs-you";
+          a.textContent = d.needs.kind === "browser" ? "Open browser" : "Enter code on the dashboard";
+          needs.append("Needs you: " + d.needs.prompt + " ", a);
+        }
+        if (follow) window.scrollTo(0, document.body.scrollHeight);
+        if (d.finished) { location.reload(); return; }
+      }
+    } catch {}
+    timer = setTimeout(poll, document.hidden ? 5000 : 1500);
+  }
+  window.refreshLive = () => { clearTimeout(timer); poll(); };
+  timer = setTimeout(poll, 1500);
+})();`;
+
+export const runStats = (run: Run) =>
+  `fetched ${run.fetched} · ${run.dryRun ? "would create" : "new"} ${run.created} · already synced ${run.skipped} · unmapped ${run.unmapped}`;
+
 export const RunPage = (p: { run: Run; shots: string[]; logs?: string[]; msg?: string }) => {
   const live = p.run.status === "running" || p.run.status === "awaiting_mfa";
   return (
-  <Layout title={`Run ${p.run.id}`} nav="dashboard" msg={p.msg}>
+  <Layout title={`Run ${p.run.id}`} nav="dashboard" msg={p.msg} script={live ? RUN_LIVE_JS : undefined}>
+    <div id="run" data-id={String(p.run.id)} data-conn={p.run.connectionId} data-log-length={String(p.run.log.length)} />
     <div class="row between">
       <h2>
-        Run #{p.run.id} · <a href={`/connections/${p.run.connectionId}`}>{p.run.connectionId}</a> <Badge status={p.run.status} />
+        Run #{p.run.id} · <a href={`/connections/${p.run.connectionId}`}>{p.run.connectionId}</a>{" "}
+        <span id="run-badge" class={`badge ${p.run.status}`}>
+          {p.run.status === "awaiting_mfa" ? "needs you" : p.run.status}
+        </span>
         {p.run.dryRun && <span class="tag">dry run: nothing written</span>}
       </h2>
       {live && <CancelButton connectionId={p.run.connectionId} />}
@@ -573,11 +725,14 @@ export const RunPage = (p: { run: Run; shots: string[]; logs?: string[]; msg?: s
       {p.run.trigger} · started {p.run.startedAt}
       {p.run.finishedAt && ` · finished ${p.run.finishedAt}`}
       <br />
-      fetched {p.run.fetched} · {p.run.dryRun ? "would create" : "new"} {p.run.created} · already synced {p.run.skipped} · unmapped {p.run.unmapped}
+      <span id="run-stats">{runStats(p.run)}</span>
     </p>
+    {live && <div id="run-needs" class="needs" />}
     {p.run.error && <pre class="failed">{p.run.error}</pre>}
-    <h2>Log</h2>
-    <pre>{p.run.log || "(empty)"}</pre>
+    <h2>Log{live && <LiveBadge />}</h2>
+    <pre id="run-log" data-empty={p.run.log ? undefined : "1"}>
+      {p.run.log || "(empty)"}
+    </pre>
     {p.logs && p.logs.length > 0 && (
       <>
         <h2>Browser logs</h2>
@@ -646,11 +801,20 @@ async function refresh() {
 }
 form.addEventListener("change", refresh);
 form.addEventListener("submit", (e) => { e.preventDefault(); refresh(); history.replaceState(null, "", "?" + new URLSearchParams(new FormData(form))); });
-setInterval(() => { if (document.getElementById("live").checked) refresh(); }, 5000);`;
+const live = () => document.getElementById("live").checked;
+const dot = document.getElementById("logs-live");
+const showDot = () => { dot.style.display = live() ? "" : "none"; };
+document.getElementById("live").addEventListener("change", showDot);
+showDot();
+window.refreshLive = () => { if (live()) refresh(); };
+setInterval(() => { if (live() && !document.hidden) refresh(); }, 5000);`;
 
 export const LogsPage = (p: { entries: LogEntry[]; level: string; q: string; maxMb: string }) => (
   <Layout title="Logs" nav="logs" script={LOGS_JS}>
-    <h2>Logs</h2>
+    <h2>
+      Logs
+      <LiveBadge id="logs-live" />
+    </h2>
     <div class="card">
       <form class="toolbar" id="logfilter" method="get" action="/logs">
         <select name="level">
@@ -749,6 +913,7 @@ const REMOTE_JS = `
   es.addEventListener("end", () => {
     es.close();
     status.textContent = "The run no longer needs you. Back to the connection…";
+    document.getElementById("remote-live").style.display = "none";
     setTimeout(() => { location.href = "/connections/" + encodeURIComponent(id); }, 1500);
   });
   es.onerror = () => { status.textContent = "Reconnecting…"; };
@@ -798,6 +963,7 @@ export const RemotePage = (p: { connectionId: string; prompt?: string }) => (
     <div class="row between">
       <h2>
         <a href={`/connections/${p.connectionId}`}>{p.connectionId}</a> · browser
+        {p.prompt && <LiveBadge id="remote-live" title="Live view" />}
       </h2>
       {p.prompt && (
         <div class="row">

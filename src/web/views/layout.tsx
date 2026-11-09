@@ -79,6 +79,18 @@ button.link:hover { color: var(--fg); }
 .login form { display: grid; gap: 14px; }
 .login label { display: grid; gap: 4px; font-weight: 500; }
 .login button[type=submit] { padding: 9px 12px; margin-top: 4px; }
+.step { color: var(--muted); font-size: 12px; margin-top: 3px; white-space: normal; max-width: 260px; }
+.mfa.attention { border-width: 2px; animation: attention 1.6s ease-in-out 3; }
+@keyframes attention { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn) 35%, transparent); } }
+.toasts { position: fixed; right: 16px; bottom: 16px; display: grid; gap: 8px; z-index: 10; max-width: min(420px, calc(100vw - 32px)); }
+.toast { display: block; padding: 10px 14px; border-radius: 8px; background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--muted); color: var(--fg); text-decoration: none; box-shadow: 0 4px 16px rgba(0,0,0,.25); animation: toast-in .2s ease-out; }
+.toast.success { border-left-color: var(--ok); } .toast.failed { border-left-color: var(--bad); }
+@keyframes toast-in { from { transform: translateY(8px); opacity: 0; } }
+.hint.preview { display: block; min-height: 1.5em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.needs:not(:empty) { border: 1px solid var(--warn); border-radius: 8px; padding: 10px 14px; margin: 8px 0; background: var(--card); }
+.live { display: inline-flex; align-items: center; gap: 5px; margin-left: 8px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--run); color: var(--run); font-size: 10px; font-weight: 700; letter-spacing: .06em; vertical-align: middle; }
+.live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: live-pulse 2.4s ease-in-out infinite; }
+@keyframes live-pulse { 50% { opacity: .55; } }
 .note { margin-top: 4px; padding: 8px 10px; border-left: 3px solid var(--line); background: var(--card); color: var(--muted); font-size: 13px; border-radius: 4px; }
 .screen { display: block; width: 100%; max-width: 1366px; min-height: 200px; border: 1px solid var(--line); border-radius: 6px; cursor: crosshair; background: var(--card); }
 .rlogs { margin-top: 14px; }
@@ -91,6 +103,28 @@ button.link:hover { color: var(--fg); }
 .screen:focus { outline: 2px solid var(--run); outline-offset: 2px; }
 .shots img { max-width: 100%; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 12px; }
 `;
+
+/**
+ * Keep pages fresh when the tab is shown again (switching back, phone
+ * unlocked, back button). Pages with a live partial set window.refreshLive;
+ * the rest reload, unless a form has unsaved edits.
+ */
+const FRESH_JS = `
+(() => {
+  let dirty = false;
+  let hiddenAt = 0;
+  document.addEventListener("input", (e) => { if (e.target.closest && e.target.closest("form")) dirty = true; });
+  document.addEventListener("submit", () => { dirty = false; });
+  function update() {
+    if (typeof window.refreshLive === "function") return window.refreshLive();
+    if (!dirty) location.reload();
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) { hiddenAt = Date.now(); return; }
+    if (hiddenAt && Date.now() - hiddenAt > 1000) update();
+  });
+  window.addEventListener("pageshow", (e) => { if (e.persisted) update(); });
+})();`;
 
 export type Nav = "dashboard" | "household" | "logs" | "settings";
 
@@ -157,6 +191,7 @@ export function Layout(props: { title?: string; nav?: Nav; msg?: string; error?:
             {props.error && <div class="flash error">{props.error}</div>}
             {props.children}
           </main>
+          <script dangerouslySetInnerHTML={{ __html: FRESH_JS }} />
           {props.script && <script dangerouslySetInnerHTML={{ __html: props.script }} />}
         </body>
       </html>
