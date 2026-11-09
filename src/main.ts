@@ -11,6 +11,7 @@ import { RunStore } from "./runs.js";
 import { Scheduler } from "./scheduler.js";
 import { ConfigStore } from "./store.js";
 import { createApp } from "./web/app.js";
+import { AuthConfigError, authFromEnv, authWarnings, type AuthConfig } from "./web/auth.js";
 
 const log = logger("main");
 
@@ -73,10 +74,18 @@ async function main() {
     }
   }
 
-  const password = process.env.SURE_SYNC_ADMIN_PASSWORD;
-  if (!password) {
-    log.warn("SURE_SYNC_ADMIN_PASSWORD not set: web UI has NO login. Anyone who can reach it can change bank logins.");
+  let auth: AuthConfig;
+  try {
+    auth = authFromEnv();
+  } catch (e) {
+    if (e instanceof AuthConfigError) fail(e.message);
+    throw e;
   }
+  log.info(
+    `web login: ${auth.mode}${auth.mode === "oidc" ? ` (${auth.oidc!.issuer})` : ""}` +
+      `${auth.trustProxy ? ", trusting reverse proxy headers" : ""}${auth.publicUrl ? `, public URL ${auth.publicUrl}` : ""}`,
+  );
+  for (const w of authWarnings(auth)) log.warn(w);
 
   const scheduler = new Scheduler(store, runner);
   scheduler.reload();
@@ -90,7 +99,7 @@ async function main() {
     dataDir,
     logMaxBytes,
     sessionSecret: key,
-    admin: password ? { user: process.env.SURE_SYNC_ADMIN_USER ?? "admin", password } : undefined,
+    auth,
   });
   const port = Number(args.port);
   const server = serve({ fetch: app.fetch, hostname: args.host, port }, () => {

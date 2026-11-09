@@ -6,6 +6,8 @@ export const UiContext = createContext({
   dryRun: false,
   debugTools: false,
   auth: false,
+  /** who is signed in (password or OIDC login) */
+  user: undefined as string | undefined,
   /** runs waiting for a person in the browser view */
   needsBrowser: [] as { connectionId: string; prompt: string }[],
 });
@@ -79,6 +81,7 @@ pre { background: var(--card); border: 1px solid var(--line); border-radius: 8px
 .cron-line input { font-family: ui-monospace, monospace; font-size: 12px; max-width: 220px; }
 button.link { background: none; border: 0; padding: 0; color: var(--muted); font-weight: 500; }
 button.link:hover { color: var(--fg); }
+nav form.who { margin-left: auto; display: flex; gap: 10px; align-items: center; font-size: 13px; }
 .login-wrap { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
 .login { width: 100%; max-width: 360px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 28px 24px; }
 .login h1 { font-size: 18px; margin: 0 0 4px; }
@@ -279,7 +282,8 @@ export function Layout(props: {
               {tab("logs", "/logs", "Logs")}
               {tab("settings", "/settings", "Settings")}
               {ui.auth && (
-                <form method="post" action="/logout" style="margin-left:auto">
+                <form method="post" action="/logout" class="who">
+                  {ui.user && <span class="muted">{ui.user}</span>}
                   <button type="submit" class="link">Log out</button>
                 </form>
               )}

@@ -8,7 +8,8 @@ import { Runner } from "../src/runner.js";
 import { RunStore } from "../src/runs.js";
 import { Scheduler } from "../src/scheduler.js";
 import { ConfigStore, DEFAULT_SETTINGS } from "../src/store.js";
-import { createApp } from "../src/web/app.js";
+import { createApp, type Services } from "../src/web/app.js";
+import type { AuthConfig } from "../src/web/auth.js";
 
 export function setup() {
   const dir = mkdtempSync(join(tmpdir(), "sbs-test-"));
@@ -50,7 +51,10 @@ export function fakeSure(
   return { calls, fetch: fetchImpl };
 }
 
-export function makeApp(env: ReturnType<typeof setup>, opts: { password?: string; fetch?: typeof fetch } = {}) {
+export function makeApp(
+  env: ReturnType<typeof setup>,
+  opts: { password?: string; auth?: AuthConfig; oidc?: Services["oidc"]; fetch?: typeof fetch } = {},
+) {
   const mfa = new MfaBroker();
   const runner = new Runner(env.store, env.runs, mfa, env.dir);
   const scheduler = new Scheduler(env.store, runner);
@@ -61,7 +65,8 @@ export function makeApp(env: ReturnType<typeof setup>, opts: { password?: string
     scheduler,
     mfa,
     dataDir: env.dir,
-    admin: opts.password ? { user: "admin", password: opts.password } : undefined,
+    auth: opts.auth ?? (opts.password ? { mode: "password", trustProxy: false, admin: { user: "admin", password: opts.password } } : undefined),
+    oidc: opts.oidc,
     fetch: opts.fetch,
   });
   return { app, runner, scheduler, mfa };

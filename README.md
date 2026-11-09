@@ -233,10 +233,19 @@ Other environment variables: `SURE_SYNC_HOST` (listen address, default all),
 `SURE_SYNC_PORT`, `SURE_SYNC_DATA_DIR`, `SURE_SYNC_ADMIN_USER` (default
 `admin`), `LOG_LEVEL` (debug, info, warn, error).
 
+## Login and reverse proxies
+
+Set `SURE_SYNC_AUTH` to `oidc` (sign in with Pocket ID, Authelia, Authentik,
+Keycloak, Google…), `password` (one admin login) or `none` (only behind a proxy
+that already requires a login). Behind Caddy, Traefik or nginx also set
+`SURE_SYNC_TRUST_PROXY=1` and `SURE_SYNC_PUBLIC_URL`. Setup steps, provider
+notes and proxy examples: [docs/self-hosting.md](docs/self-hosting.md).
+
 ## Security notes
 
-The container holds bank logins and logged-in browser sessions. Keep the UI on
-your LAN or behind a VPN/reverse proxy, always set `SURE_SYNC_ADMIN_PASSWORD`,
-and protect the `/data` volume and your `.env`. Anyone with the admin login
+The container holds bank logins and logged-in browser sessions. Serve the UI
+over HTTPS on your LAN or behind a VPN/reverse proxy, always use a login
+(`oidc` or `password`, or `none` only behind forward auth), and protect the
+`/data` volume and your `.env`. Anyone with the admin login
 can change any household member's bank connection (but can't read saved
 passwords back).

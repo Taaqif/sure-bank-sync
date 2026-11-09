@@ -1152,13 +1152,30 @@ export const LogsPage = (p: { entries: LogEntry[]; level: string; q: string; max
 
 // --- login -----------------------------------------------------------------
 
-export const LoginPage = (p: { next: string; error?: string; username?: string }) => (
+export const LoginPage = (p: {
+  next: string;
+  error?: string;
+  info?: string;
+  username?: string;
+  mode?: "password" | "oidc";
+  /** OIDC provider name for the button */
+  providerName?: string;
+}) => (
   <BareLayout title="Sign in">
     <div class="login-wrap">
       <div class="login">
         <h1>Bank Sync → Sure</h1>
         <p class="sub">Sign in to manage bank syncing.</p>
+        {p.info && <div class="flash">{p.info}</div>}
         {p.error && <div class="flash error">{p.error}</div>}
+        {p.mode === "oidc" ? (
+          <form method="get" action="/auth/oidc/start">
+            <input type="hidden" name="next" value={p.next} />
+            <button type="submit" autofocus>
+              Sign in with {p.providerName ?? "single sign-on"}
+            </button>
+          </form>
+        ) : (
         <form method="post" action="/login">
           <input type="hidden" name="next" value={p.next} />
           <label>
@@ -1171,6 +1188,7 @@ export const LoginPage = (p: { next: string; error?: string; username?: string }
           </label>
           <button type="submit">Sign in</button>
         </form>
+        )}
       </div>
     </div>
   </BareLayout>

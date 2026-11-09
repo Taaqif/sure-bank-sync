@@ -16,7 +16,22 @@ import type { RunStore } from "../runs.js";
 import type { Scheduler } from "../scheduler.js";
 import { ValidationError, type ConfigStore, type ConnectionInput } from "../store.js";
 import { SureClient, SureError, type SureAccount } from "../sureClient.js";
-import { LoginLimiter, SESSION_COOKIE, SESSION_TTL_SECONDS, createSession, safeNext, verifySession } from "./session.js";
+import {
+  LoginLimiter,
+  OIDC_COOKIE,
+  OIDC_PENDING_SECONDS,
+  OidcClient,
+  OidcDenied,
+  SESSION_COOKIE,
+  SESSION_TTL_SECONDS,
+  createSession,
+  openPending,
+  safeNext,
+  sealPending,
+  sessionBinding,
+  verifySession,
+  type AuthConfig,
+} from "./auth.js";
 import { UiContext } from "./views/layout.js";
 import {
   ConnectionNewPage,
@@ -47,7 +62,10 @@ export interface Services {
   scheduler: Scheduler;
   mfa: MfaBroker;
   dataDir: string;
-  admin?: { user: string; password: string };
+  /** how people sign in (default: no login) */
+  auth?: AuthConfig;
+  /** OIDC client for auth.mode "oidc" (tests pass a fake) */
+  oidc?: Pick<OidcClient, "start" | "finish">;
   /** signs session cookies; defaults to a per-process random secret */
   sessionSecret?: string;
   /** shown on the logs page */
@@ -82,7 +100,7 @@ function safeEqual(a: string, b: string): boolean {
 
 export function createApp(svc: Services) {
   const { store, runs } = svc;
-  const app = new Hono();
+  const app = new Hono<{ Variables: { user: string } }>();
 
   // Browsers resend basic-auth credentials on cross-site form posts, so
   // reject POSTs whose Origin/Referer isn't this host. Compares host only
@@ -107,75 +125,143 @@ export function createApp(svc: Services) {
   app.get("/healthz", (c) => c.json({ status: "ok" }));
 
   // --- login ----------------------------------------------------------------
+  const auth: AuthConfig = svc.auth ?? { mode: "none", trustProxy: false };
   const secret = svc.sessionSecret ?? randomBytes(32).toString("hex");
+  const binding = sessionBinding(auth);
+  const oidcClient = auth.mode === "oidc" ? (svc.oidc ?? new OidcClient(auth.oidc!)) : undefined;
   const limiter = new LoginLimiter();
-  // Socket address, not X-Forwarded-For (a client could rotate that header to dodge the limit).
+
+  // Client address for the login limiter. Behind a trusted proxy, the
+  // rightmost X-Forwarded-For entry is the address the proxy saw (earlier
+  // entries can be made up by the client).
   const clientKey = (c: Context) => {
+    if (auth.trustProxy) {
+      const xff = (c.req.header("x-forwarded-for") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+      if (xff.length) return xff[xff.length - 1]!;
+    }
     try {
       return getConnInfo(c).remote.address ?? "unknown";
     } catch {
       return "local";
     }
   };
-  const isHttps = (c: Context) =>
-    (c.req.header("x-forwarded-proto") ?? new URL(c.req.url).protocol.replace(":", "")) === "https";
+  /** The app's external URL (for OIDC redirects). */
+  const origin = (c: Context): string => {
+    if (auth.publicUrl) return auth.publicUrl;
+    const url = new URL(c.req.url);
+    if (auth.trustProxy) {
+      const proto = c.req.header("x-forwarded-proto")?.split(",")[0]?.trim();
+      const host = c.req.header("x-forwarded-host")?.split(",")[0]?.trim();
+      return `${proto || url.protocol.replace(":", "")}://${host || url.host}`;
+    }
+    return url.origin;
+  };
+  const isHttps = (c: Context) => origin(c).startsWith("https:");
+  const cookieOpts = (c: Context, maxAge: number, path = "/") =>
+    ({ httpOnly: true, sameSite: "Lax", secure: isHttps(c), path, maxAge }) as const;
 
-  function authenticated(c: Context): boolean {
-    const admin = svc.admin!;
-    if (verifySession(getCookie(c, SESSION_COOKIE), secret, admin.user, admin.password)) return true;
-    // Basic auth still works for scripts/curl, but not from web browsers: they
-    // keep sending saved Basic credentials, which would undo Log out.
-    // Browsers mark every request with Sec-Fetch-Mode; scripts don't.
-    if (c.req.header("sec-fetch-mode")) return false;
+  /** Signed-in user ("" when there's no login), or null. */
+  function currentUser(c: Context): string | null {
+    if (auth.mode === "none") return "";
+    const user = verifySession(getCookie(c, SESSION_COOKIE), secret, binding);
+    if (user !== null) return user;
+    // Password mode: Basic auth still works for scripts/curl, but not from web
+    // browsers: they keep sending saved Basic credentials, which would undo
+    // Log out. Browsers mark every request with Sec-Fetch-Mode; scripts don't.
+    if (auth.mode !== "password" || c.req.header("sec-fetch-mode")) return null;
+    const admin = auth.admin!;
     const [scheme, encoded] = (c.req.header("authorization") ?? "").split(" ");
     if (scheme?.toLowerCase() === "basic" && encoded) {
       const decoded = Buffer.from(encoded, "base64").toString();
       const i = decoded.indexOf(":");
-      return i >= 0 && safeEqual(decoded.slice(0, i), admin.user) && safeEqual(decoded.slice(i + 1), admin.password);
+      if (i >= 0 && safeEqual(decoded.slice(0, i), admin.user) && safeEqual(decoded.slice(i + 1), admin.password)) return admin.user;
     }
-    return false;
+    return null;
   }
 
+  const loginPage = (c: Context, p: { next: string; error?: string; username?: string; info?: string }, status: 200 | 401 | 403 | 429 | 502 = 200) =>
+    c.html(<LoginPage {...p} mode={auth.mode === "oidc" ? "oidc" : "password"} providerName={auth.oidc?.name} />, status);
+
   app.get("/login", (c) => {
-    if (!svc.admin || authenticated(c)) return c.redirect(safeNext(c.req.query("next")), 303);
-    return c.html(<LoginPage next={safeNext(c.req.query("next"))} />);
+    const next = safeNext(c.req.query("next"));
+    if (currentUser(c) !== null) return c.redirect(next, 303);
+    return loginPage(c, { next, info: c.req.query("loggedOut") ? "You're signed out." : undefined });
   });
 
   app.post("/login", async (c) => {
-    if (!svc.admin) return c.redirect("/", 303);
+    if (auth.mode !== "password") return c.redirect("/login", 303);
+    const admin = auth.admin!;
     const b = await c.req.parseBody();
     const next = safeNext(str(b, "next"));
     const key = clientKey(c);
     if (limiter.blocked(key)) {
       log.warn(`login blocked for ${key}: too many failed attempts`);
-      return c.html(<LoginPage next={next} error="Too many failed attempts. Try again in 15 minutes." />, 429);
+      return loginPage(c, { next, error: "Too many failed attempts. Try again in 15 minutes." }, 429);
     }
-    const ok = safeEqual(str(b, "username"), svc.admin.user) && safeEqual(str(b, "password"), svc.admin.password);
+    const ok = safeEqual(str(b, "username"), admin.user) && safeEqual(str(b, "password"), admin.password);
     if (!ok) {
       limiter.fail(key);
       log.warn(`failed login for ${JSON.stringify(str(b, "username").slice(0, 40))} from ${key}`);
       await new Promise((r) => setTimeout(r, 400));
-      return c.html(<LoginPage next={next} username={str(b, "username")} error="Wrong username or password." />, 401);
+      return loginPage(c, { next, username: str(b, "username"), error: "Wrong username or password." }, 401);
     }
     limiter.reset(key);
-    setCookie(c, SESSION_COOKIE, createSession(secret, svc.admin.user, svc.admin.password), {
-      httpOnly: true,
-      sameSite: "Lax",
-      secure: isHttps(c),
-      path: "/",
-      maxAge: SESSION_TTL_SECONDS,
-    });
+    setCookie(c, SESSION_COOKIE, createSession(secret, binding, admin.user), cookieOpts(c, SESSION_TTL_SECONDS));
     log.info(`login from ${key}`);
     return c.redirect(next, 303);
   });
 
+  // OIDC: /auth/oidc/start sends the browser to the provider, which comes back to /auth/oidc/callback.
+  app.get("/auth/oidc/start", async (c) => {
+    if (!oidcClient) return c.redirect("/login", 303);
+    const next = safeNext(c.req.query("next"));
+    try {
+      const { url, pending } = await oidcClient.start(`${origin(c)}/auth/oidc/callback`, next);
+      setCookie(c, OIDC_COOKIE, sealPending(secret, pending), cookieOpts(c, OIDC_PENDING_SECONDS, "/auth/oidc"));
+      return c.redirect(url, 302);
+    } catch (e) {
+      log.error("OIDC sign-in couldn't start", e);
+      return loginPage(c, { next, error: `Couldn't reach ${auth.oidc!.name}: ${(e as Error).message}` }, 502);
+    }
+  });
+
+  app.get("/auth/oidc/callback", async (c) => {
+    if (!oidcClient) return c.redirect("/login", 303);
+    const pending = openPending(secret, getCookie(c, OIDC_COOKIE));
+    deleteCookie(c, OIDC_COOKIE, { path: "/auth/oidc" });
+    if (!pending) return loginPage(c, { next: "/", error: "The sign-in took too long or was started elsewhere. Try again." }, 401);
+    const providerError = c.req.query("error");
+    if (providerError) {
+      const desc = c.req.query("error_description");
+      return loginPage(c, { next: pending.next, error: `${auth.oidc!.name} said: ${desc || providerError}` }, 401);
+    }
+    try {
+      const callback = new URL(`${origin(c)}/auth/oidc/callback${new URL(c.req.url).search}`);
+      const user = await oidcClient.finish(callback, pending);
+      setCookie(c, SESSION_COOKIE, createSession(secret, binding, user), cookieOpts(c, SESSION_TTL_SECONDS));
+      log.info(`OIDC login: ${user} from ${clientKey(c)}`);
+      return c.redirect(pending.next, 303);
+    } catch (e) {
+      if (e instanceof OidcDenied) {
+        log.warn(`OIDC login refused: ${e.message}`);
+        return loginPage(c, { next: "/", error: e.message }, 403);
+      }
+      log.error("OIDC sign-in failed", e);
+      return loginPage(c, { next: pending.next, error: `Sign-in with ${auth.oidc!.name} failed: ${(e as Error).message}` }, 401);
+    }
+  });
+
   app.post("/logout", (c) => {
     deleteCookie(c, SESSION_COOKIE, { path: "/" });
-    return c.redirect("/login", 303);
+    return c.redirect("/login?loggedOut=1", 303);
   });
 
   app.use("*", async (c, next) => {
-    if (!svc.admin || authenticated(c)) return next();
+    const user = currentUser(c);
+    if (user !== null) {
+      c.set("user", user);
+      return next();
+    }
     const path = c.req.path;
     const wantsHtml = c.req.method === "GET" && !path.startsWith("/api/") && !path.startsWith("/partials/");
     if (wantsHtml) {
@@ -192,7 +278,8 @@ export function createApp(svc: Services) {
         value={{
           dryRun: store.settings().dryRun,
           debugTools: DEBUG_TOOLS,
-          auth: !!svc.admin,
+          auth: auth.mode !== "none",
+          user: c.get("user") || undefined,
           needsBrowser: svc.mfa
             .pending()
             .filter((m) => m.kind === "browser")
@@ -639,6 +726,9 @@ export function createApp(svc: Services) {
 
   app.get("/connections/:id/remote/stream", (c) => {
     const session = svc.runner.remote.get(c.req.param("id"));
+    // Live stream: ask reverse proxies (nginx and friends) not to buffer or cache it.
+    c.header("X-Accel-Buffering", "no");
+    c.header("Cache-Control", "no-cache, no-transform");
     return streamSSE(c, async (stream) => {
       if (!session) {
         await stream.writeSSE({ event: "end", data: "" });

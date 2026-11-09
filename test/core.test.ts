@@ -299,14 +299,17 @@ describe("anz csv", async () => {
 });
 
 describe("sessions", async () => {
-  const { createSession, verifySession, safeNext } = await import("../src/web/session.js");
-  it("signs, expires and invalidates on password change", () => {
-    const t = createSession("k", "admin", "pw", 0);
-    expect(verifySession(t, "k", "admin", "pw", 1000)).toBe(true);
-    expect(verifySession(t, "k", "admin", "changed", 1000)).toBe(false);
-    expect(verifySession(t, "other", "admin", "pw", 1000)).toBe(false);
-    expect(verifySession(t, "k", "admin", "pw", 31 * 24 * 3600 * 1000)).toBe(false);
-    expect(verifySession("garbage", "k", "admin", "pw")).toBe(false);
+  const { createSession, verifySession, safeNext } = await import("../src/web/auth.js");
+  it("signs, expires and invalidates when the binding changes", () => {
+    const t = createSession("k", "password\0admin\0pw", "admin", 0);
+    expect(verifySession(t, "k", "password\0admin\0pw", 1000)).toBe("admin");
+    expect(verifySession(t, "k", "password\0admin\0changed", 1000)).toBeNull();
+    expect(verifySession(t, "other", "password\0admin\0pw", 1000)).toBeNull();
+    expect(verifySession(t, "k", "password\0admin\0pw", 31 * 24 * 3600 * 1000)).toBeNull();
+    expect(verifySession("garbage", "k", "password\0admin\0pw")).toBeNull();
+    // the user part can't be swapped
+    const [exp, , sig] = t.split(".");
+    expect(verifySession(`${exp}.${Buffer.from("eve").toString("base64url")}.${sig}`, "k", "password\0admin\0pw", 1000)).toBeNull();
   });
   it("only allows local redirect targets", () => {
     expect(safeNext("/settings?x=1")).toBe("/settings?x=1");
