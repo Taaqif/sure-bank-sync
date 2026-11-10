@@ -197,8 +197,8 @@ transaction summary → types the From/To dates for the sync period → CSV →
 Download. Statements (optional, own schedule): View statements → each account →
 each financial year in range → downloads every statement PDF issued in the last
 200 days (statements are 6-monthly; the default statement schedule is the 15th
-of January and July). Sure has no statement upload API yet, so statement runs only log what
-they would send.
+of January and July). Sure has no statement upload API yet, so statement runs
+only log what they would send.
 
 **Macquarie Bank (AU)**: logs in with Macquarie ID + password, hands the
 "I'm not a robot" check (and anything it doesn't recognise) to you through the
