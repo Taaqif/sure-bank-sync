@@ -14,7 +14,7 @@
  */
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Page, Request } from "playwright";
+import type { Locator, Page, Request } from "playwright";
 import type { BankAccount, BankTransaction } from "../models.js";
 import { parseTotpSecret, totp, totpSecondsLeft } from "../totp.js";
 import { AuthError, captureJson, pause, ProviderError, settle, snapshot, type DateRange, type ProviderContext, type ProviderDefinition } from "./base.js";
@@ -108,20 +108,19 @@ class StakeProvider {
       throw new ProviderError("Stake: the login page didn't show a login form");
     }
 
+    // The login page redraws itself just after it opens (Angular), which
+    // empties anything typed too early: let it settle, then type and check.
+    await settle(page);
     ctx.log("stake: logging in");
     const email = page.locator(EMAIL).first();
-    if (await email.isVisible().catch(() => false)) {
-      await email.fill(ctx.credentials.email ?? "");
-      await pause(300, 700);
-    }
+    if (await email.isVisible().catch(() => false)) await this.#type(page, email, ctx.credentials.email ?? "", "email");
     const password = page.locator(PASSWORD).first();
     if (!(await password.isVisible().catch(() => false))) {
       // Email first, password on the next step.
       await this.#submit(page);
       await password.waitFor({ state: "visible", timeout: 15_000 });
     }
-    await password.fill(ctx.credentials.password ?? "");
-    await pause(300, 700);
+    await this.#type(page, password, ctx.credentials.password ?? "", "password");
     await this.#submit(page);
 
     const next = await this.#waitFor(page, 30_000, [OTP]);
@@ -163,10 +162,34 @@ class StakeProvider {
     return this.#token ? "token" : "timeout";
   }
 
+  /** Type like a person and make sure the box kept it (retyping up to 3 times). */
+  async #type(page: Page, box: Locator, value: string, what: string): Promise<void> {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await box.click();
+      await box.fill("");
+      await box.pressSequentially(value, { delay: 40 + Math.random() * 40 });
+      await pause(400, 800);
+      if ((await box.inputValue().catch(() => "")) === value) return;
+      this.ctx.log(`stake: the ${what} box was cleared, typing it again`);
+      await settle(page);
+    }
+    await snapshot(this.ctx, `stake-${what}`);
+    throw new ProviderError(`Stake: the ${what} box keeps clearing itself`);
+  }
+
+  /** Press the form's button once it's enabled (Stake greys it out until the form is valid). */
   async #submit(page: Page): Promise<void> {
-    const button = page.locator(SUBMIT).first();
-    if (await button.isVisible().catch(() => false)) await button.click();
-    else await page.getByRole("button", { name: /log ?in|sign ?in|continue|next|verify|submit/i }).first().click();
+    const named = page.getByRole("button", { name: /log ?in|sign ?in|continue|next|verify|submit/i });
+    const button = page.locator(`${SUBMIT}:visible`).or(named).first();
+    const deadline = Date.now() + 10_000;
+    while (!(await button.isEnabled().catch(() => false))) {
+      if (Date.now() > deadline) {
+        await snapshot(this.ctx, "stake-button-disabled");
+        throw new ProviderError("Stake: the Log In button stayed greyed out (the page didn't accept what was typed)");
+      }
+      await page.waitForTimeout(250);
+    }
+    await button.click();
   }
 
   async listAccounts(): Promise<BankAccount[]> {
