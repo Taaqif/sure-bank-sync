@@ -8,7 +8,7 @@ import { MfaBroker, MfaTimeout, RETRY, RetryLogin } from "./mfa.js";
 import { startRecording } from "./recorder.js";
 import { RemoteHub } from "./remote.js";
 import { maskAccountId, type BankStatement, type BankTransaction } from "./models.js";
-import { PROVIDERS, syncDays, ProviderError, snapshot, type DateRange, type ProviderContext } from "./providers/index.js";
+import { ALL_TIME_DAYS, PROVIDERS, syncDays, ProviderError, snapshot, type DateRange, type ProviderContext } from "./providers/index.js";
 import type { BankProvider, ProviderDefinition } from "./providers/base.js";
 import { pushTransactions } from "./push.js";
 import { pushStatements } from "./pushStatements.js";
@@ -385,7 +385,8 @@ export class Runner {
       else if (flags.debug) rlog("DEBUG RUN: visible browser, network capture and downloads kept; nothing written to Sure");
       if (discover) rlog("DISCOVER: listing accounts only, no transactions fetched");
       else if (dryRun) rlog("DRY RUN: nothing will be written to Sure");
-      rlog(`${conn.provider}, ${range.since} → ${range.until}`);
+      const allTime = !statements && syncDays(conn) === ALL_TIME_DAYS;
+      rlog(`${conn.provider}, ${allTime ? `all time → ${range.until}` : `${range.since} → ${range.until}`}`);
       const bank = this.#bankLock(conn.provider);
       if (!bank.available) rlog(`waiting for another ${def.label} run to finish (one per bank at a time)`);
       await bank.acquire(signal);

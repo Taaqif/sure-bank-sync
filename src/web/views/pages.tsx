@@ -689,6 +689,7 @@ export const ConnectionNewPage = (p: {
               ))}
             </select>
           </label>
+          {p.provider.note && <div class="note">{p.provider.note}</div>}
           {p.userId !== undefined && <input type="hidden" name="userId" value={String(p.userId)} />}
           <noscript>
             <button type="submit" class="secondary">Change bank</button>

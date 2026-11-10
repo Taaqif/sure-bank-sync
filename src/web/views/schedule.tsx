@@ -1,4 +1,4 @@
-import type { SyncPeriod } from "../../providers/base.js";
+import { ALL_TIME, type SyncPeriod } from "../../providers/base.js";
 import { EVERY_HOURS, MONTH_DAYS, WEEKDAYS, halfYearMonths, cronPreview, cronPreviewText, describeCron, ordinal, parseCron, type ScheduleMode } from "../../schedule.js";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -102,12 +102,13 @@ export function LookbackField(p: { name: string; value: number | null; period: S
   const choices = [...period.choices];
   if (p.value && !choices.includes(p.value)) choices.push(p.value);
   choices.sort((a, b) => a - b);
-  const days = (n: number) => (n === 1 ? "Last 1 day" : `Last ${n} days`);
+  if (period.allTime) choices.push(ALL_TIME);
+  const days = (n: number) => (n === ALL_TIME ? "All time" : n === 1 ? "Last 1 day" : `Last ${n} days`);
   return (
     <label>
       Sync period
       <select name={p.name}>
-        <option value="" selected={!p.value}>
+        <option value="" selected={p.value === null}>
           Bank default ({days(period.default).toLowerCase()})
         </option>
         {choices.map((n) => (

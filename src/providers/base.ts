@@ -12,6 +12,8 @@ export interface CredentialField {
   key: string;
   label: string;
   secret?: boolean;
+  /** short help shown under the box */
+  hint?: string;
 }
 
 export interface ProviderContext {
@@ -190,14 +192,27 @@ export interface StatementSupport {
 }
 
 export type SyncPeriod =
-  | { choices: number[]; default: number; note?: string }
+  | {
+      choices: number[];
+      default: number;
+      note?: string;
+      /** offer "All time" too (stored as ALL_TIME), e.g. for a first import */
+      allTime?: boolean;
+    }
   | { fixed: string; label: string };
+
+/** Stored sync period meaning "everything the bank has". */
+export const ALL_TIME = 0;
+/** The range an all-time run asks for: far enough back for any account. */
+export const ALL_TIME_DAYS = 365 * 30;
 
 export interface ProviderDefinition {
   /** stored provider id */
   name: string;
   /** shown in the UI */
   label: string;
+  /** what this connection covers (and doesn't), shown under the bank picker */
+  note?: string;
   /** login fields the UI asks for; all are required */
   credentialFields: CredentialField[];
   /**

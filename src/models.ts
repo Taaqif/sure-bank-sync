@@ -20,6 +20,28 @@ export interface BankTransaction {
   bankId?: string;
   pending?: boolean;
   raw?: Record<string, string>;
+  /**
+   * Set by brokers: this row is a trade or cash movement in an investment
+   * account and goes to Sure as a trade, not a CSV transaction import.
+   * amountCents still follows the bank convention (a buy is money out).
+   */
+  investment?: InvestmentActivity;
+}
+
+export type InvestmentKind = "buy" | "sell" | "dividend" | "deposit" | "withdrawal" | "interest" | "fee";
+
+export interface InvestmentActivity {
+  kind: InvestmentKind;
+  /** e.g. "CBA"; required for buy, sell and dividend */
+  ticker?: string;
+  /** exchange MIC so Sure finds the right listing, e.g. "XASX" */
+  exchange?: string;
+  /** units, buy/sell only (decimal string, always positive) */
+  qty?: string;
+  /** price per unit, buy/sell only (decimal string) */
+  price?: string;
+  /** brokerage, buy/sell only, integer cents */
+  feeCents?: number;
 }
 
 /** A statement document downloaded from a bank (e.g. a monthly PDF). */

@@ -1,6 +1,7 @@
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { ALL_TIME_DAYS, syncDays, syncLabel } from "../src/providers/index.js";
 import { sql } from "drizzle-orm";
 import { emptyStats } from "../src/runs.js";
 import { fakeSure, form, makeApp, setup } from "./helpers.js";
@@ -266,6 +267,34 @@ describe("web", () => {
     expect(amex).toContain("Amex doesn&#39;t support choosing a sync period");
     expect(amex).not.toContain('name="lookbackDays"');
     expect(await (await get(app, "/settings")).text()).not.toContain("Sync period");
+  });
+
+  it("says Stake is AUD only and explains the 2FA secret", async () => {
+    const env = setup();
+    const { app } = makeApp(env);
+    const html = await (await get(app, "/connections/new?provider=stake")).text();
+    expect(html).toContain("Stake (ASX, AUD only)");
+    expect(html).toContain("AUD only: Australian shares (ASX) and the AUD cash wallet. Wall St (USD) isn&#39;t imported.");
+    expect(html).toContain("The setup key (or otpauth:// link)");
+    expect(html).toMatch(/type="password" name="cred_totpSecret"/);
+  });
+
+  it("offers All time only where the bank supports it, and saves it", async () => {
+    const env = setup();
+    const { app } = makeApp(env);
+    expect(await (await get(app, "/connections/new?provider=stake")).text()).toContain('<option value="0">All time</option>');
+    expect(await (await get(app, "/connections/new?provider=anz")).text()).not.toContain("All time");
+    const id = env.store.saveConnection(null, {
+      userId: env.userId, provider: "stake", enabled: true, schedule: null, lookbackDays: 0,
+      credentials: { email: "a@b.c", password: "pw", totpSecret: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ" }, options: {},
+    });
+    const conn = env.store.connection(id)!;
+    expect(conn.lookbackDays).toBe(0);
+    expect(syncLabel(conn)).toBe("all time");
+    expect(syncDays(conn)).toBe(ALL_TIME_DAYS);
+    // A bank without All time falls back to its default.
+    expect(syncDays({ provider: "anz", lookbackDays: 0 })).toBe(14);
+    expect(await (await get(app, `/connections/${id}`)).text()).toMatch(/<option value="0" selected="">All time<\/option>/);
   });
 
   it("saves the browser console with a failed run's debug files", async () => {

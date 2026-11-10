@@ -8,7 +8,7 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { Child } from "hono/jsx";
 import { clearLogFile, logFileBytes, logger, tailLog } from "../log.js";
 import { RETRY, type MfaBroker } from "../mfa.js";
-import { PROVIDERS, syncLabel } from "../providers/index.js";
+import { ALL_TIME, PROVIDERS, syncLabel, type SyncPeriod } from "../providers/index.js";
 import { DEBUG_TOOLS, type Runner } from "../runner.js";
 import { RECIPE_RE, type Recording } from "../recorder.js";
 import { cronPreview, describeCron } from "../schedule.js";
@@ -569,10 +569,18 @@ export function createApp(svc: Services) {
       statementsEnabled: !!def.statements && b.statementsEnabled === "on",
       statementSchedule: str(b, "statementSchedule") || null,
       // Banks with a fixed period ignore any stored choice.
-      lookbackDays: lookback && !("fixed" in def.syncPeriod) ? Number(lookback) : null,
+      lookbackDays: lookbackChoice(lookback, def.syncPeriod),
       credentials: Object.fromEntries(def.credentialFields.map((f) => [f.key, str(b, `cred_${f.key}`).trim()])),
       options: options as Record<string, unknown>,
     };
+  }
+
+  /** The picked sync period, or null for the bank default. */
+  function lookbackChoice(value: string, period: SyncPeriod): number | null {
+    if (!value || "fixed" in period) return null;
+    const days = Number(value);
+    if (days === ALL_TIME && !period.allTime) throw new ValidationError("this bank can't sync all time");
+    return days;
   }
 
   app.get("/connections/new", (c) => {

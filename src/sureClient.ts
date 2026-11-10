@@ -117,6 +117,46 @@ export class SureClient {
     return out;
   }
 
+  /** Trades (buys, sells, dividends...) already in one Sure account between two dates (inclusive). */
+  async listTrades(sureAccountId: string, startDate: string, endDate: string): Promise<SureTrade[]> {
+    const out: SureTrade[] = [];
+    for (let page = 1; page <= 50; page++) {
+      const q = new URLSearchParams({
+        account_id: sureAccountId,
+        start_date: startDate,
+        end_date: endDate,
+        per_page: "100",
+        page: String(page),
+      });
+      const data = await this.request<{ trades?: RawSureTrade[]; pagination?: { total_pages?: number } }>("GET", `/trades?${q}`);
+      for (const t of data.trades ?? []) {
+        const amount = moneyCents(t.amount);
+        if (amount === null || !t.date) continue;
+        out.push({
+          id: t.id,
+          date: t.date,
+          // Sure: positive = money out. Flip to the bank convention.
+          amountCents: -amount || 0,
+          qty: t.qty === undefined || t.qty === null ? null : Number(t.qty),
+          ticker: t.security?.ticker ?? null,
+          label: t.investment_activity_label ?? null,
+        });
+      }
+      if (!data.trades?.length || page >= (data.pagination?.total_pages ?? 1)) break;
+    }
+    return out;
+  }
+
+  /**
+   * Create one trade, dividend, deposit... in an investment account. Sure
+   * answers with a trade, a transaction (fees, unlinked deposits) or a
+   * transfer; only the id matters here.
+   */
+  async createTrade(trade: SureTradeInput): Promise<{ id: string }> {
+    const res = await this.request<{ id?: string; data?: { id?: string } }>("POST", "/trades", { trade });
+    return { id: String(res?.id ?? res?.data?.id ?? "") };
+  }
+
   async getImport(id: string): Promise<SureImport> {
     return (await this.request<{ data: SureImport }>("GET", `/imports/${encodeURIComponent(id)}`)).data;
   }
@@ -145,6 +185,52 @@ interface RawSureTransaction {
   amount_decimal?: string;
   /** income positive, everything else negative */
   signed_amount_cents?: number;
+}
+
+export interface SureTrade {
+  id: string;
+  date: string;
+  /** bank convention: negative = money out (a buy) */
+  amountCents: number;
+  /** signed: negative for sells */
+  qty: number | null;
+  ticker: string | null;
+  /** "Buy", "Sell", "Dividend"... */
+  label: string | null;
+}
+
+/** Body of POST /api/v1/trades. Amounts are decimal strings; Sure picks the sign from `type`. */
+export interface SureTradeInput {
+  account_id: string;
+  type: string;
+  date: string;
+  currency?: string;
+  amount?: string;
+  qty?: string;
+  price?: string;
+  fee?: string;
+  /** "CBA|XASX" (ticker|exchange MIC) */
+  ticker?: string;
+}
+
+interface RawSureTrade {
+  id: string;
+  date?: string;
+  /** formatted money, e.g. "$1,234.56" or "-$12.30"; positive = money out */
+  amount?: string;
+  qty?: string | number | null;
+  investment_activity_label?: string | null;
+  security?: { ticker?: string } | null;
+}
+
+/** "-A$1,234.56" -> -123456; null when it isn't a number. */
+export function moneyCents(text: string | undefined): number | null {
+  if (!text) return null;
+  const negative = /^\s*[-(]|-\s*[$\d]/.test(text);
+  const digits = text.replace(/[^\d.]/g, "");
+  if (!/^\d+(\.\d+)?$/.test(digits)) return null;
+  const cents = Math.round(Number(digits) * 100);
+  return negative ? -cents : cents;
 }
 
 function sureCents(t: RawSureTransaction): number | null {

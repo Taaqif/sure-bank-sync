@@ -101,6 +101,7 @@ export function CredentialInputs(p: { fields: CredentialField[]; setKeys?: strin
               placeholder={isSet ? "•••••••• (unchanged)" : undefined}
               required={!isSet}
             />
+            {f.hint && <small>{f.hint}</small>}
             {isSet && <small>Leave blank to keep the saved value.</small>}
           </label>
         );

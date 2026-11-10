@@ -267,8 +267,9 @@ export class ConfigStore {
     if (!user) throw new ValidationError("unknown person");
     const schedule = input.schedule?.trim() ? validateCron(input.schedule) : null;
     const statementSchedule = input.statementSchedule?.trim() ? validateCron(input.statementSchedule) : null;
-    if (input.lookbackDays !== null && !(input.lookbackDays >= 1 && input.lookbackDays <= 365)) {
-      throw new ValidationError("lookback days must be 1-365");
+    // 0 = all time (only offered for banks that support it).
+    if (input.lookbackDays !== null && !(Number.isInteger(input.lookbackDays) && input.lookbackDays >= 0 && input.lookbackDays <= 3650)) {
+      throw new ValidationError("sync period must be 1-3650 days, or all time");
     }
     const merged = id ? this.credentials(id) : {};
     for (const [k, v] of Object.entries(input.credentials)) if (v) merged[k] = v;

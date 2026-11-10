@@ -6,7 +6,8 @@ shared household: each person has their own Sure API key and bank logins,
 all managed from a small web UI.
 
 Supported banks: **ANZ Internet Banking** (AU), **American Express** (AU),
-**CommBank NetBank** (AU), **Macquarie Bank** (AU).
+**CommBank NetBank** (AU), **Macquarie Bank** (AU), and the broker
+**Stake** (AU, ASX and AUD only).
 `demo` is a fake bank for testing the pipeline.
 
 Stack: Node + TypeScript, Playwright, Hono (server-rendered JSX), SQLite via
@@ -206,6 +207,21 @@ browser view, trusts the browser when asked and sends SMS codes to the code
 box. For each account it sets the transactions date filter to the sync period
 (Add filter → Date range → Custom), then Download → .CSV. Accounts with no
 transactions in the period are skipped.
+
+**Stake (AU, ASX and AUD only)**: Australian shares and the AUD cash wallet.
+Wall St (USD) isn't imported. Logs in with email + password and types the 2FA
+code itself from the 2FA secret (the setup key or `otpauth://` link you got
+when turning 2FA on). Stake has no CSV export, so it reads the JSON the Stake
+web app loads: AUD deposits, withdrawals and dividends, and ASX buys and sells.
+Map it to an **Investment** account in Sure. Each row goes in through Sure's
+trades API (buys and sells with units, price and brokerage, so Sure tracks the
+holdings). Before sending, it skips anything already in that Sure account,
+including rows entered by hand: cash movements match on amount, buys and sells
+on ticker + units, with dates up to 5 days apart (trade date vs settlement
+date). Dividends whose share can't be told for sure are skipped and logged.
+The sync period has an **All time** choice for a first import of your whole
+history; switch back to a shorter one afterwards.
+Still being finished: the login and API mapping need a live check.
 
 **ANZ Internet Banking**: logs in with CRN + password, reads the account tiles
 on the home page, then for each account clicks the tile → Download, picks a

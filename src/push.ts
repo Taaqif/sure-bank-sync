@@ -3,6 +3,7 @@
  * send the rest to Sure as one CSV import per Sure account.
  */
 import { assignExternalIds, formatCents, maskAccountId, type BankAccount, type BankTransaction, type IdentifiedTransaction } from "./models.js";
+import { pushInvestments } from "./pushTrades.js";
 import type { RunStats, RunStore } from "./runs.js";
 import type { ConfigStore, Connection, Settings } from "./store.js";
 import { SureClient, SureError, toImportCsv, type SureImport, type SureTransaction } from "./sureClient.js";
@@ -69,6 +70,17 @@ export async function pushTransactions(
   if (!todo.length) return;
 
   const sure = new SureClient(settings.sureUrl, deps.store.sureApiKey(conn.userId), settings.sureSource, 30_000, deps.fetch);
+
+  // Broker activity goes in as trades, one by one; the rest as a CSV import.
+  const trades = todo.filter(([, t]) => t.investment);
+  todo = todo.filter(([, t]) => !t.investment);
+  if (trades.length) {
+    await pushInvestments({ runs: deps.runs, signal: deps.signal }, sure, conn.id, trades, stats, log, {
+      dryRun,
+      verbose: settings.verboseLogs,
+    });
+  }
+  if (!todo.length) return;
 
   // Rows we have no local record of may still be in Sure (new database, or a
   // run that timed out). Sure's import matches on name too, so a transaction
