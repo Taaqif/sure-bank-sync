@@ -816,7 +816,7 @@ export const ConnectionPage = (p: {
 
       <ConnRuns conn={p.conn} runs={p.runs} />
 
-      {ui.debugTools && <TrainForm connectionId={p.conn.id} running={p.running} canStartLoggedOut={!!p.provider?.startUrl} />}
+      {ui.debugTools && <TrainForm connectionId={p.conn.id} running={p.running} canStartLoggedOut={!!p.provider?.startUrl} loginWorks={!p.provider?.unfinished} />}
 
       <h2>Edit connection</h2>
       <div class="card">
@@ -863,7 +863,7 @@ export const ConnectionPage = (p: {
 // --- runs ------------------------------------------------------------------
 
 /** Debug tools: record a person's steps in the bank site as a named recipe. */
-const TrainForm = (p: { connectionId: string; running: boolean; canStartLoggedOut: boolean }) => (
+const TrainForm = (p: { connectionId: string; running: boolean; canStartLoggedOut: boolean; loginWorks: boolean }) => (
   <>
     <h2 id="train">
       Train <span class="tag">debug</span>
@@ -883,17 +883,21 @@ const TrainForm = (p: { connectionId: string; running: boolean; canStartLoggedOu
             ))}
             <option value="">Other…</option>
           </select>
-          <small>What you're about to show, e.g. setting the date filter.</small>
+          <small>What you're about to show, e.g. statements: opening and downloading statement PDFs.</small>
         </label>
         <label id="train-other" hidden>
           Recipe name
-          <input type="text" name="recipeOther" pattern="[a-zA-Z0-9][a-zA-Z0-9 -]{0,39}" placeholder="e.g. statements" />
+          <input type="text" name="recipeOther" pattern="[a-zA-Z0-9][a-zA-Z0-9 -]{0,39}" placeholder="e.g. card-list" />
           <small>Letters, numbers and dashes.</small>
         </label>
-        <label class="check">
-          <input type="checkbox" name="login" value="1" checked disabled={!p.canStartLoggedOut} />
-          Log in first with the stored login
-        </label>
+        {p.loginWorks ? (
+          <label class="check">
+            <input type="checkbox" name="login" value="1" checked disabled={!p.canStartLoggedOut} />
+            Log in first with the stored login
+          </label>
+        ) : (
+          <p class="muted">This bank's login isn't built yet, so recording starts at its login page.</p>
+        )}
         {!p.canStartLoggedOut && <input type="hidden" name="login" value="1" />}
         <div>
           <button type="submit" disabled={p.running}>

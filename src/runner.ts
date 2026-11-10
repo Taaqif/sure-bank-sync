@@ -41,7 +41,7 @@ export interface RunOptions {
 }
 
 export interface TrainOptions {
-  /** recipe name, e.g. "date-filter" */
+  /** recipe name, e.g. "download" */
   recipe: string;
   /** log in with the stored login first, then record; otherwise start at the provider's startUrl */
   login: boolean;
@@ -592,7 +592,8 @@ export class Runner {
     verbose: boolean,
   ): Promise<void> {
     const browser = ctx.browser;
-    if (train.login) {
+    if (train.login && def.unfinished) rlog(`${def.label} login isn't built yet; starting at its login page instead`);
+    if (train.login && !def.unfinished) {
       await withRetry(() => provider.login(), rlog);
       rlog("logged in; recording starts now");
     } else {

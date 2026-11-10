@@ -196,5 +196,7 @@ export interface ProviderDefinition {
   syncPeriod: SyncPeriod;
   /** where a Train recording starts when it isn't logging in first */
   startUrl?: string;
+  /** still being built: login doesn't work yet, so Train starts logged out by default */
+  unfinished?: boolean;
   create(ctx: ProviderContext): BankProvider;
 }

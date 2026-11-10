@@ -2,7 +2,7 @@
  * "Train" recorder: while a person clicks through a bank site (in the debug
  * window or the remote browser view), record each step with several selector
  * candidates, a screenshot and the page HTML. The result is a "recipe" (e.g.
- * date-filter, discover, download) used to write or repair a provider.
+ * login, discover, download, statements) used to write or repair a provider.
  *
  * Privacy: password/code-like fields are never recorded, and typed values that
  * match the connection's stored login are saved as {{field}} placeholders.
@@ -62,7 +62,7 @@ export interface Recording {
 }
 
 export const RECIPE_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
-export const RECIPE_SUGGESTIONS = ["date-filter", "download", "discover", "login"];
+export const RECIPE_SUGGESTIONS = ["login", "discover", "download", "statements"];
 export const recordingFile = (recipe: string) => `recipe-${recipe}.json`;
 
 /*
