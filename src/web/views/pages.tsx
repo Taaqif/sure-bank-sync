@@ -725,13 +725,20 @@ export const ConnectionNewPage = (p: {
   </Layout>
 );
 
+/** Which bank accounts a connection has found; the page reloads its mapping when this changes. */
+export const accountsKey = (accounts: { bankAccountId: string }[]) =>
+  accounts
+    .map((a) => a.bankAccountId)
+    .sort()
+    .join("|");
+
 /** Connection title and run bar (refreshed live). */
-export const ConnActions = (p: { conn: Connection; provider?: ProviderDefinition; running: boolean }) => {
+export const ConnActions = (p: { conn: Connection; provider?: ProviderDefinition; running: boolean; accounts: string }) => {
   const ui = useContext(UiContext);
   const statements = p.provider?.statements;
   const label = p.provider?.label ?? p.conn.provider;
   return (
-    <div id="conn-actions" data-running={p.running ? "1" : undefined}>
+    <div id="conn-actions" data-running={p.running ? "1" : undefined} data-accounts={p.accounts}>
       <div class="row between">
         <h2>
           {p.conn.userName} · {p.conn.id} <span class="muted">({label})</span>
@@ -794,7 +801,8 @@ export const ConnRuns = (p: { conn: Connection; runs: RunsPage }) => (
 /*
  * Connection page: refresh the run buttons and the runs table every 2s while
  * a run is going (10s otherwise, 15s in a background tab). Forms elsewhere on
- * the page (mapping, edit) are left alone.
+ * the page are left alone, except the account mapping: when a run finds new
+ * accounts it's reloaded, unless someone has changed it without saving.
  */
 const CONN_LIVE_JS = `
 (() => {
@@ -813,10 +821,32 @@ const CONN_LIVE_JS = `
             if (part === "conn-actions") restoreKind();
           }
         }
+        const found = doc.getElementById("conn-actions")?.dataset.accounts;
+        if (found !== undefined) await refreshAccounts(found);
       }
     } catch {}
     const running = !!document.querySelector("#conn-actions[data-running]");
     timer = setTimeout(poll, document.hidden ? 15000 : running ? 2000 : 10000);
+  }
+  // New accounts found: swap in the mapping section from a fresh page.
+  let mappingEdited = false;
+  document.addEventListener("change", (e) => {
+    if (e.target.closest && e.target.closest("#conn-accounts")) mappingEdited = true;
+  });
+  async function refreshAccounts(found) {
+    const box = document.getElementById("conn-accounts");
+    if (!box || box.dataset.accounts === found) return;
+    if (mappingEdited) {
+      if (!box.querySelector(".accounts-changed")) {
+        box.querySelector("h2").insertAdjacentHTML("afterend",
+          '<div class="flash accounts-changed">New accounts were found. Save your mapping, then reload the page to see them.</div>');
+      }
+      return;
+    }
+    const r = await fetch(location.pathname + location.search, { credentials: "same-origin" });
+    if (!r.ok) return;
+    const fresh = new DOMParser().parseFromString(await r.text(), "text/html").getElementById("conn-accounts");
+    if (fresh) box.replaceWith(fresh);
   }
   // Remember Transactions/Statements per connection (survives refreshes and reloads).
   const key = "sbs-kind:" + id;
@@ -851,8 +881,9 @@ export const ConnectionPage = (p: {
   return (
     <Layout title={p.conn.id} nav="dashboard" msg={p.msg} script={SCHEDULE_JS + CONN_LIVE_JS}>
       <div id="conn" data-id={p.conn.id} />
-      <ConnActions conn={p.conn} provider={p.provider} running={p.running} />
+      <ConnActions conn={p.conn} provider={p.provider} running={p.running} accounts={accountsKey(p.accounts)} />
 
+      <div id="conn-accounts" data-accounts={accountsKey(p.accounts)}>
       <h2 id="accounts">Accounts</h2>
       {p.sureError && <div class="flash error">Couldn't load Sure accounts: {p.sureError}</div>}
       <div class="card">
@@ -895,6 +926,7 @@ export const ConnectionPage = (p: {
             appear here to map. Nothing is imported.
           </div>
         )}
+      </div>
       </div>
 
       <ConnRuns conn={p.conn} runs={p.runs} />

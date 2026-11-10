@@ -40,6 +40,7 @@ import {
   LogsPage,
   type LogEntry,
   ConnectionPage,
+  accountsKey,
   ConnActions,
   ConnRuns,
   DashboardPage,
@@ -624,7 +625,12 @@ export function createApp(svc: Services) {
     return page(
       c,
       <>
-        <ConnActions conn={conn} provider={PROVIDERS[conn.provider]} running={svc.runner.isRunning(conn.id)} />
+        <ConnActions
+          conn={conn}
+          provider={PROVIDERS[conn.provider]}
+          running={svc.runner.isRunning(conn.id)}
+          accounts={accountsKey(store.bankAccounts(conn.id))}
+        />
         <ConnRuns conn={conn} runs={runs.page(conn.id, runsPage(c))} />
       </>,
     );

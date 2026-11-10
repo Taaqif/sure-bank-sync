@@ -279,6 +279,19 @@ describe("web", () => {
     expect(html).toMatch(/type="password" name="cred_totpSecret"/);
   });
 
+  it("tells the connection page which accounts are found, so it can reload the mapping", async () => {
+    const env = setup();
+    const { app } = makeApp(env);
+    const id = env.store.connections()[0]!.id;
+    const before = await (await get(app, `/connections/${id}/partials/live`)).text();
+    expect(before).toContain('data-accounts=""');
+    env.store.recordBankAccounts(id, [{ id: "b-2", name: "Saver", currency: "AUD" }, { id: "a-1", name: "Everyday", currency: "AUD" }]);
+    const after = await (await get(app, `/connections/${id}/partials/live`)).text();
+    expect(after).toContain('data-accounts="a-1|b-2"');
+    const page = await (await get(app, `/connections/${id}`)).text();
+    expect(page).toContain('id="conn-accounts" data-accounts="a-1|b-2"');
+  });
+
   it("offers All time only where the bank supports it, and saves it", async () => {
     const env = setup();
     const { app } = makeApp(env);
