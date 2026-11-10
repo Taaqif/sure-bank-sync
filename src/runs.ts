@@ -1,7 +1,7 @@
 /** Run history and record of what's already been pushed to Sure. */
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { nowIso, type Db } from "./db/client.js";
-import { runs, synced, type Run, type RunStatus } from "./db/schema.js";
+import { runs, synced, type Run, type RunKind, type RunStatus } from "./db/schema.js";
 
 export interface RunStats {
   fetched: number;
@@ -31,10 +31,10 @@ export class RunStore {
       .run();
   }
 
-  start(connectionId: string, userName: string, trigger: Run["trigger"], dryRun = false): number {
+  start(connectionId: string, userName: string, trigger: Run["trigger"], dryRun = false, kind: RunKind = "transactions"): number {
     return this.db
       .insert(runs)
-      .values({ connectionId, userName, trigger, dryRun, status: "queued", startedAt: nowIso() })
+      .values({ connectionId, userName, trigger, kind, dryRun, status: "queued", startedAt: nowIso() })
       .returning({ id: runs.id })
       .get().id;
   }

@@ -11,6 +11,17 @@ export interface SureAccount {
   account_type?: string;
 }
 
+/** DRAFT: what a statement upload will send, once Sure has an API for it. */
+export interface SureStatementUpload {
+  fileName: string;
+  contentType: string;
+  data: Buffer;
+  /** YYYY-MM-DD issued, and the period covered when known */
+  date: string;
+  periodStart?: string;
+  periodEnd?: string;
+}
+
 export class SureClient {
   constructor(
     private readonly baseUrl: string,
@@ -68,6 +79,15 @@ export class SureClient {
       publish: "true",
     });
     return res.data;
+  }
+
+  /**
+   * DRAFT: Sure has no statement upload API yet. When it does, send the file
+   * here (likely a multipart POST for one account) and return Sure's id for it.
+   * Not called anywhere until then.
+   */
+  async uploadStatement(_sureAccountId: string, _statement: SureStatementUpload): Promise<{ id: string }> {
+    throw new SureError("Sure has no statement upload API yet");
   }
 
   /**

@@ -15,6 +15,13 @@
       "when": 1794193436283,
       "tag": "0001_run_dry_run",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1794312336918,
+      "tag": "0002_statements",
+      "breakpoints": true
     }
   ]
 }

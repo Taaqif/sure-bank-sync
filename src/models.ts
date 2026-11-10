@@ -22,6 +22,21 @@ export interface BankTransaction {
   raw?: Record<string, string>;
 }
 
+/** A statement document downloaded from a bank (e.g. a monthly PDF). */
+export interface BankStatement {
+  account: BankAccount;
+  /** YYYY-MM-DD the statement was issued (some banks show nothing else) */
+  date: string;
+  /** YYYY-MM-DD period covered, when the bank shows it */
+  periodStart?: string;
+  periodEnd?: string;
+  fileName: string;
+  /** e.g. "application/pdf" */
+  contentType: string;
+  /** file contents (downloads are removed with the browser, so read them in) */
+  data: Buffer;
+}
+
 export interface IdentifiedTransaction extends BankTransaction {
   externalId: string;
 }

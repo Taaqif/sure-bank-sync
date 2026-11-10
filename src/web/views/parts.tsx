@@ -58,6 +58,7 @@ export function RunsTable({ runs, page, pages, total, href }: RunsPage & { href:
             <td>{r.connectionId}</td>
             <td class="muted">
               {r.trigger}
+              {r.kind === "statements" && <span class="tag">statements</span>}
               {r.dryRun && <span class="tag">dry run</span>}
             </td>
             <td><Badge status={r.status} /></td>

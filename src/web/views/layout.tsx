@@ -81,6 +81,10 @@ textarea { font-family: ui-monospace, monospace; font-size: 12px; min-height: 60
 .between { justify-content: space-between; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
 details summary { cursor: pointer; color: var(--muted); }
+fieldset.stack { display: grid; gap: 14px; padding: 12px 14px; margin: 0; border: 1px solid var(--line); border-radius: 8px; max-width: none; }
+fieldset.stack legend { padding: 0 4px; font-weight: 600; }
+fieldset.stack > small { color: var(--muted); font-size: 12px; }
+fieldset:disabled { opacity: .6; }
 .empty { padding: 24px 16px; color: var(--muted); }
 pre { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; font-size: 12px; white-space: pre-wrap; }
 .err { color: var(--bad); white-space: normal; max-width: 380px; overflow: hidden; text-overflow: ellipsis; }

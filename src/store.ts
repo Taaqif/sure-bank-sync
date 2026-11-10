@@ -45,6 +45,8 @@ export const SettingsSchema = z.object({
     .transform((s) => s || "sure-bank-sync"),
   timezone: z.string().trim().refine(validTimezone, "unknown timezone"),
   schedule: z.string(),
+  /** default schedule for statement imports (connections that turn them on) */
+  statementSchedule: z.string(),
   skipPending: z.boolean(),
   mfaTimeoutSeconds: z.coerce.number().int().min(30, "MFA timeout must be 30-3600s").max(3600, "MFA timeout must be 30-3600s"),
   /** runs with a browser working at the same time (runs waiting for a person don't count, up to the same number again) */
@@ -63,6 +65,8 @@ export const DEFAULT_SETTINGS: Settings = {
   sureSource: "sure-bank-sync",
   timezone: "Australia/Melbourne",
   schedule: "0 6 * * *",
+  // Every 6 months, a week after banks issue half-yearly statements (early Jan / Jul).
+  statementSchedule: "0 7 15 1,7 *",
   skipPending: true,
   mfaTimeoutSeconds: 300,
   maxBrowsers: 2,
@@ -84,6 +88,9 @@ export interface Connection {
   enabled: boolean;
   schedule: string | null;
   lookbackDays: number | null;
+  statementsEnabled: boolean;
+  /** null = default statement schedule */
+  statementSchedule: string | null;
   options: Record<string, unknown>;
   /** which secrets are set (never the values) */
   credentialKeys: string[];
@@ -95,6 +102,9 @@ export interface ConnectionInput {
   enabled: boolean;
   schedule: string | null;
   lookbackDays: number | null;
+  /** default: off */
+  statementsEnabled?: boolean;
+  statementSchedule?: string | null;
   /** blank values keep what's stored */
   credentials: Record<string, string>;
   options: Record<string, unknown>;
@@ -125,7 +135,11 @@ export class ConfigStore {
   saveSettings(input: unknown): Settings {
     const parsed = SettingsSchema.safeParse(input);
     if (!parsed.success) throw new ValidationError(zodMessage(parsed.error));
-    const s = { ...parsed.data, schedule: validateCron(parsed.data.schedule) };
+    const s = {
+      ...parsed.data,
+      schedule: validateCron(parsed.data.schedule),
+      statementSchedule: validateCron(parsed.data.statementSchedule),
+    };
     this.db.transaction((tx) => {
       for (const [key, value] of Object.entries(s)) {
         tx.insert(settings).values({ key, value }).onConflictDoUpdate({ target: settings.key, set: { value } }).run();
@@ -193,6 +207,8 @@ export class ConfigStore {
       enabled: r.enabled,
       schedule: r.schedule,
       lookbackDays: r.lookbackDays,
+      statementsEnabled: r.statementsEnabled,
+      statementSchedule: r.statementSchedule,
       options: r.options,
       credentialKeys: Object.keys(creds)
         .filter((k) => creds[k])
@@ -209,6 +225,8 @@ export class ConfigStore {
         enabled: connections.enabled,
         schedule: connections.schedule,
         lookbackDays: connections.lookbackDays,
+        statementsEnabled: connections.statementsEnabled,
+        statementSchedule: connections.statementSchedule,
         credentials: connections.credentials,
         options: connections.options,
         userName: users.name,
@@ -248,6 +266,7 @@ export class ConfigStore {
     const user = this.user(input.userId);
     if (!user) throw new ValidationError("unknown person");
     const schedule = input.schedule?.trim() ? validateCron(input.schedule) : null;
+    const statementSchedule = input.statementSchedule?.trim() ? validateCron(input.statementSchedule) : null;
     if (input.lookbackDays !== null && !(input.lookbackDays >= 1 && input.lookbackDays <= 365)) {
       throw new ValidationError("lookback days must be 1-365");
     }
@@ -258,6 +277,8 @@ export class ConfigStore {
       enabled: input.enabled,
       schedule,
       lookbackDays: input.lookbackDays,
+      statementsEnabled: input.statementsEnabled ?? false,
+      statementSchedule,
       credentials: this.crypto.encrypt(JSON.stringify(merged)),
       options: input.options,
     };

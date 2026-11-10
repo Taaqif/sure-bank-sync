@@ -21,11 +21,16 @@ export const connections = sqliteTable("connections", {
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
   provider: text("provider").notNull(),
+  /** sync transactions on schedule (statements have their own switch) */
   enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
   /** null = use default */
   schedule: text("schedule"),
   /** null = use default */
   lookbackDays: integer("lookback_days"),
+  /** import bank statements on their own schedule (banks that support it) */
+  statementsEnabled: integer("statements_enabled", { mode: "boolean" }).notNull().default(false),
+  /** null = use default statement schedule */
+  statementSchedule: text("statement_schedule"),
   /** encrypted JSON object */
   credentials: text("credentials").notNull(),
   options: text("options", { mode: "json" }).$type<Record<string, unknown>>().notNull().default(sql`'{}'`),
@@ -53,6 +58,9 @@ export const bankAccounts = sqliteTable(
 // --- run history / sync state ------------------------------------------
 
 /** queued: waiting for its bank or a browser slot */
+/** what a run imports */
+export type RunKind = "transactions" | "statements";
+
 export type RunStatus = "queued" | "running" | "awaiting_mfa" | "success" | "failed" | "cancelled";
 
 export const runs = sqliteTable(
@@ -62,6 +70,7 @@ export const runs = sqliteTable(
     connectionId: text("connection_id").notNull(),
     userName: text("user_name").notNull(),
     trigger: text("trigger").$type<"schedule" | "manual" | "discover" | "train">().notNull(),
+    kind: text("kind").$type<RunKind>().notNull().default("transactions"),
     /** nothing was written to Sure; `created` counts would-be writes */
     dryRun: integer("dry_run", { mode: "boolean" }).notNull().default(false),
     status: text("status").$type<RunStatus>().notNull(),

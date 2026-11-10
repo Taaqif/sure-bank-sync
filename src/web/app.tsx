@@ -302,6 +302,7 @@ export function createApp(svc: Services) {
       scheduleLabel: conn.enabled
         ? `${describeCron(conn.schedule ?? s.schedule)} · ${syncLabel(conn)}`
         : "not scheduled",
+      statementNextRun: svc.scheduler.nextRun(conn.id, "statements"),
       conn,
       providerLabel: PROVIDERS[conn.provider]?.label ?? conn.provider,
       running: svc.runner.isRunning(conn.id),
@@ -339,6 +340,7 @@ export function createApp(svc: Services) {
         lastRunAt: r.last?.startedAt ?? null,
         lastSuccessAt: r.lastOk?.finishedAt ?? null,
         nextRunAt: r.nextRun?.toISOString() ?? null,
+        nextStatementRunAt: r.statementNextRun?.toISOString() ?? null,
       })),
     ),
   );
@@ -455,6 +457,7 @@ export function createApp(svc: Services) {
       sureSource: str(b, "sureSource"),
       timezone: str(b, "timezone"),
       schedule: str(b, "schedule"),
+      statementSchedule: str(b, "statementSchedule"),
       skipPending: b.skipPending === "on",
       mfaTimeoutSeconds: str(b, "mfaTimeoutSeconds"),
       maxBrowsers: str(b, "maxBrowsers"),
@@ -562,6 +565,9 @@ export function createApp(svc: Services) {
       provider,
       enabled: b.enabled === "on",
       schedule: str(b, "schedule") || null,
+      // Banks without statement support post nothing here (the fields are disabled).
+      statementsEnabled: !!def.statements && b.statementsEnabled === "on",
+      statementSchedule: str(b, "statementSchedule") || null,
       // Banks with a fixed period ignore any stored choice.
       lookbackDays: lookback && !("fixed" in def.syncPeriod) ? Number(lookback) : null,
       credentials: Object.fromEntries(def.credentialFields.map((f) => [f.key, str(b, `cred_${f.key}`).trim()])),
@@ -688,6 +694,7 @@ export function createApp(svc: Services) {
     if (!store.connection(id)) return c.notFound();
     const b = await c.req.parseBody();
     svc.runner.startBackground(id, {
+      kind: b.kind === "statements" ? "statements" : undefined,
       dryRun: b.dryRun === "1" || undefined,
       discover: b.discover === "1" || undefined,
       debug: b.debug === "1" || undefined,

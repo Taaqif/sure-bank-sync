@@ -4,7 +4,7 @@
  * (type a word into a fake check page and press the button), {"fail": true}
  * a failed login with console output (for the debug files).
  */
-import type { BankAccount, BankTransaction } from "../models.js";
+import type { BankAccount, BankStatement, BankTransaction } from "../models.js";
 import { AuthError, type ProviderDefinition } from "./base.js";
 
 const ACCT: BankAccount = { id: "000-111 9999", name: "Demo Everyday", currency: "AUD" };
@@ -27,6 +27,7 @@ export const demo: ProviderDefinition = {
   label: "Demo bank (testing)",
   credentialFields: [],
   syncPeriod: { choices: [1, 3, 7, 14, 30], default: 7 },
+  statements: { lookbackDays: 62, note: "Demo: a tiny fake PDF per account for each month." },
   create: (ctx) => ({
     async login() {
       ctx.log("demo: logging in");
@@ -59,6 +60,21 @@ export const demo: ProviderDefinition = {
         const date = d.toISOString().slice(0, 10);
         out.push({ account: acct, date, amountCents: -450, description: "DEMO COFFEE CO" });
         if (d.getUTCDate() === 1) out.push({ account: acct, date, amountCents: 250_000, description: "DEMO SALARY" });
+      }
+      return out;
+    },
+    async fetchStatements({ since, until }) {
+      // One statement per account for every whole month that ends in the range.
+      const out: BankStatement[] = [];
+      for (let m = new Date(`${since.slice(0, 7)}-01T00:00:00Z`); ; m.setUTCMonth(m.getUTCMonth() + 1)) {
+        const start = m.toISOString().slice(0, 10);
+        const end = new Date(Date.UTC(m.getUTCFullYear(), m.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
+        if (end > until) break;
+        if (end < since) continue;
+        for (const account of [ACCT, SAVER]) {
+          const data = Buffer.from(`%PDF-1.4\n% demo statement ${account.name} ${start} to ${end}\n%%EOF\n`);
+          out.push({ account, date: end, periodStart: start, periodEnd: end, fileName: `demo-${account.id.slice(-4)}-${start.slice(0, 7)}.pdf`, contentType: "application/pdf", data });
+        }
       }
       return out;
     },

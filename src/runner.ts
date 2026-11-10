@@ -7,11 +7,13 @@ import { virtualDisplay } from "./display.js";
 import { MfaBroker, MfaTimeout, RETRY, RetryLogin } from "./mfa.js";
 import { startRecording } from "./recorder.js";
 import { RemoteHub } from "./remote.js";
-import { maskAccountId, type BankTransaction } from "./models.js";
+import { maskAccountId, type BankStatement, type BankTransaction } from "./models.js";
 import { PROVIDERS, syncDays, ProviderError, snapshot, type DateRange, type ProviderContext } from "./providers/index.js";
 import type { BankProvider, ProviderDefinition } from "./providers/base.js";
 import { pushTransactions } from "./push.js";
+import { pushStatements } from "./pushStatements.js";
 import { emptyStats, type RunStore } from "./runs.js";
+import type { RunKind } from "./db/schema.js";
 import type { ConfigStore, Connection, Settings } from "./store.js";
 import { SureError } from "./sureClient.js";
 
@@ -32,6 +34,8 @@ export class AlreadyRunning extends Error {}
 export class Cancelled extends Error {}
 
 export interface RunOptions {
+  /** what to import (default transactions) */
+  kind?: RunKind;
   dryRun?: boolean;
   discover?: boolean;
   /** visible, slowed-down browser + capture; dry run. Ignored unless DEBUG_TOOLS. */
@@ -51,10 +55,15 @@ export interface TrainOptions {
 const TRAIN_TIMEOUT_MS = 30 * 60_000;
 
 interface RunFlags {
+  kind: RunKind;
   dryRun: boolean;
   discover: boolean;
   debug: boolean;
   train?: TrainOptions;
+}
+interface Scraped {
+  txns: BankTransaction[];
+  statements: BankStatement[];
 }
 export class UnknownConnection extends Error {}
 
@@ -331,10 +340,11 @@ export class Runner {
       const train = DEBUG_TOOLS ? opts.train : undefined;
       const debug = DEBUG_TOOLS && (opts.debug ?? !!train);
       const discover = !train && (opts.discover ?? false);
+      const kind: RunKind = train || discover ? "transactions" : (opts.kind ?? "transactions");
       const dryRun = discover || debug || (opts.dryRun ?? settings.dryRun);
-      const runId = this.runs.start(connectionId, conn.userName, train ? "train" : discover ? "discover" : trigger, dryRun);
+      const runId = this.runs.start(connectionId, conn.userName, train ? "train" : discover ? "discover" : trigger, dryRun, kind);
       active.runId = runId;
-      await this.#run(runId, conn, settings, { dryRun, discover, debug, train }, active);
+      await this.#run(runId, conn, settings, { kind, dryRun, discover, debug, train }, active);
       return runId;
     } finally {
       this.#active.delete(connectionId);
@@ -367,7 +377,10 @@ export class Runner {
       const missing = def.credentialFields.filter((f) => !creds[f.key]).map((f) => f.label);
       if (missing.length) throw new ProviderError(`missing credentials: ${missing.join(", ")}`);
 
-      const range = dateRange(settings.timezone, syncDays(conn));
+      const statements = flags.kind === "statements";
+      if (statements && !def.statements) throw new ProviderError(`${def.label} can't import statements yet`);
+      const range = dateRange(settings.timezone, statements ? def.statements!.lookbackDays : syncDays(conn));
+      if (statements) rlog("STATEMENTS: importing bank statements, not transactions");
       if (flags.train) rlog(`TRAIN: recording recipe "${flags.train.recipe}"; nothing fetched or written`);
       else if (flags.debug) rlog("DEBUG RUN: visible browser, network capture and downloads kept; nothing written to Sure");
       if (discover) rlog("DISCOVER: listing accounts only, no transactions fetched");
@@ -376,14 +389,14 @@ export class Runner {
       const bank = this.#bankLock(conn.provider);
       if (!bank.available) rlog(`waiting for another ${def.label} run to finish (one per bank at a time)`);
       await bank.acquire(signal);
-      let txns: BankTransaction[];
+      let scraped: Scraped;
       try {
         if (!this.#browsers.available) rlog("waiting for a browser slot (Settings → Browsers at once)");
         await this.#browsers.acquire(signal);
         active.hasSlot = true;
         this.runs.setStatus(runId, "running");
         try {
-          txns = await this.#scrape(runId, conn, settings, creds, debugDir, range, rlog, flags, active);
+          scraped = await this.#scrape(runId, conn, settings, creds, debugDir, range, rlog, flags, active);
         } finally {
           if (active.hasSlot) this.#browsers.release();
           active.hasSlot = false;
@@ -403,6 +416,15 @@ export class Runner {
         rlog(`done: ${n} accounts known for this connection. Map them on the connection page.`);
         return;
       }
+      if (statements) {
+        stats.fetched = scraped.statements.length;
+        if (flags.debug) await this.#keepStatementFiles(scraped.statements, debugDir);
+        await pushStatements({ store: this.store, runs: this.runs }, conn, scraped.statements, stats, rlog, settings.verboseLogs);
+        this.runs.finish(runId, "success", stats);
+        rlog(`done: ${stats.fetched} statements fetched, ${stats.skipped} already sent, ${stats.unmapped} unmapped`);
+        return;
+      }
+      const txns = scraped.txns;
       stats.fetched = txns.length;
       rlog(`fetched ${txns.length} transactions`);
 
@@ -439,7 +461,7 @@ export class Runner {
     rlog: (m: string) => void,
     flags: RunFlags,
     active: ActiveRun,
-  ): Promise<BankTransaction[]> {
+  ): Promise<Scraped> {
     const { discover, debug } = flags;
     const profile = join(this.dataDir, "browser", conn.id);
     // Banks remember a trusted device through this profile's cookies. A new
@@ -545,7 +567,7 @@ export class Runner {
     try {
       if (flags.train) {
         await this.#train(flags.train, conn, def, provider, ctx, rlog, settings.verboseLogs);
-        return [];
+        return { txns: [], statements: [] };
       }
       await withRetry(() => provider.login(), rlog);
       rlog("logged in");
@@ -557,9 +579,13 @@ export class Runner {
       } else if (discover) {
         throw new ProviderError(`${conn.provider} can't list accounts; do a dry run instead to find them`);
       }
-      const txns = discover ? [] : await provider.fetchTransactions(range);
+      const out: Scraped = { txns: [], statements: [] };
+      if (flags.kind === "statements") {
+        if (!provider.fetchStatements) throw new ProviderError(`${def.label} can't fetch statements`);
+        out.statements = await provider.fetchStatements(range);
+      } else if (!discover) out.txns = await provider.fetchTransactions(range);
       await provider.logout?.().catch((e: Error) => rlog(`logout failed (ignored): ${e.message}`));
-      return txns;
+      return out;
     } catch (e) {
       failed = true;
       if (active.abort.signal.aborted) throw e;
@@ -579,6 +605,12 @@ export class Runner {
       active.browser = undefined;
       await browser.close().catch(() => {});
     }
+  }
+
+  /** Debug runs keep the downloaded statement files. */
+  async #keepStatementFiles(statements: BankStatement[], debugDir: string): Promise<void> {
+    await mkdir(debugDir, { recursive: true });
+    for (const st of statements) await writeFile(join(debugDir, `statement-${st.account.id}-${st.fileName}`.replace(/[^\w.-]+/g, "_")), st.data);
   }
 
   /** Log in (optional), then record what a person does until they press Finish recording. */

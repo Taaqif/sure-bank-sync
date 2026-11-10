@@ -2,7 +2,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { BrowserContext, Page, Request } from "playwright";
-import type { BankAccount, BankTransaction } from "../models.js";
+import type { BankAccount, BankStatement, BankTransaction } from "../models.js";
 
 /** Expected failure (bad password, site changed, locked out...). Shown as-is in the UI. */
 export class ProviderError extends Error {}
@@ -174,7 +174,19 @@ export interface BankProvider {
   listAccounts?(): Promise<BankAccount[]>;
   /** All transactions across all accounts within the range. */
   fetchTransactions(range: DateRange): Promise<BankTransaction[]>;
+  /**
+   * Statements (e.g. monthly PDFs) issued within the range, for every
+   * account. Accounts with none in the range just add nothing. Only for providers whose definition sets `statements`.
+   */
+  fetchStatements?(range: DateRange): Promise<BankStatement[]>;
   logout?(): Promise<void>;
+}
+
+export interface StatementSupport {
+  /** how many days back a statement run looks for statements */
+  lookbackDays: number;
+  /** shown under the statement settings, e.g. "PDF statements, monthly" */
+  note?: string;
 }
 
 export type SyncPeriod =
@@ -194,6 +206,11 @@ export interface ProviderDefinition {
    * short note shown instead of the picker.
    */
   syncPeriod: SyncPeriod;
+  /**
+   * Set when the bank can import statements (fetchStatements), on their own
+   * schedule. Left out: the UI shows statement imports as not available.
+   */
+  statements?: StatementSupport;
   /** where a Train recording starts when it isn't logging in first */
   startUrl?: string;
   /** still being built: login doesn't work yet, so Train starts logged out by default */

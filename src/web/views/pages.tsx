@@ -19,6 +19,8 @@ export interface ConnectionRow {
   last?: Run;
   lastOk?: Run;
   nextRun: Date | null;
+  /** next scheduled statement import (null: statements off or not supported) */
+  statementNextRun: Date | null;
   /** e.g. "Daily at 06:00 · last 14 days" */
   scheduleLabel: string;
   mfa?: MfaRequest;
@@ -152,6 +154,12 @@ export function DashboardStatus(p: DashboardProps) {
                   {formatWhen(r.nextRun, p.settings.timezone)}
                   <br />
                   <small>{r.scheduleLabel}</small>
+                  {r.statementNextRun && (
+                    <>
+                      <br />
+                      <small>Statements: {formatWhen(r.statementNextRun, p.settings.timezone)}</small>
+                    </>
+                  )}
                 </td>
                 <td>
                   {r.running ? (
@@ -287,6 +295,10 @@ export const SettingsPage = (p: { s: Settings; storage?: StorageInfo; msg?: stri
           <small>Used for schedules and "today", e.g. Australia/Melbourne.</small>
         </label>
         <ScheduleField name="schedule" label="Default schedule" value={p.s.schedule} timezone={p.s.timezone} />
+        <div>
+          <ScheduleField name="statementSchedule" label="Default statement schedule" value={p.s.statementSchedule} timezone={p.s.timezone} />
+          <small>For connections that import statements (banks that support it). Usually every 6 months.</small>
+        </div>
         <label>
           MFA timeout (seconds)
           <input type="number" name="mfaTimeoutSeconds" value={String(p.s.mfaTimeoutSeconds)} min="30" max="3600" required />
@@ -592,9 +604,14 @@ export const UserPage = (p: { user: User; conns: Connection[]; msg?: string }) =
 
 // --- connections -----------------------------------------------------------
 
-function ScheduleFields(p: { conn?: Connection; settings: Settings; provider?: ProviderDefinition }) {
+/** Transaction sync: on/off, schedule and sync period. */
+function TransactionFields(p: { conn?: Connection; settings: Settings; provider?: ProviderDefinition }) {
   return (
-    <>
+    <fieldset class="stack">
+      <legend>Transactions</legend>
+      <label class="check">
+        <input type="checkbox" name="enabled" checked={p.conn ? p.conn.enabled : true} /> Sync transactions on a schedule
+      </label>
       <ScheduleField
         name="schedule"
         label="Schedule"
@@ -603,7 +620,33 @@ function ScheduleFields(p: { conn?: Connection; settings: Settings; provider?: P
         timezone={p.settings.timezone}
       />
       {p.provider && <LookbackField name="lookbackDays" value={p.conn?.lookbackDays ?? null} period={p.provider.syncPeriod} />}
-    </>
+    </fieldset>
+  );
+}
+
+/** Statement imports: on/off and their own schedule. Disabled for banks that can't do it yet. */
+function StatementFields(p: { conn?: Connection; settings: Settings; provider?: ProviderDefinition }) {
+  const support = p.provider?.statements;
+  return (
+    <fieldset class="stack statements" disabled={!support}>
+      <legend>Statements</legend>
+      <label class="check">
+        <input type="checkbox" name="statementsEnabled" checked={!!support && !!p.conn?.statementsEnabled} /> Import statements on
+        a schedule
+      </label>
+      <ScheduleField
+        name="statementSchedule"
+        label="Schedule"
+        value={p.conn?.statementSchedule ?? null}
+        defaultCron={p.settings.statementSchedule}
+        timezone={p.settings.timezone}
+      />
+      <small>
+        {support
+          ? `Downloads new statements and sends them to Sure.${support.note ? ` ${support.note}` : ""}`
+          : `${p.provider?.label ?? "This bank"} can't import statements yet.`}
+      </small>
+    </fieldset>
   );
 }
 
@@ -664,10 +707,8 @@ export const ConnectionNewPage = (p: {
             </select>
           </label>
           <CredentialInputs fields={p.provider.credentialFields} />
-          <label class="check">
-            <input type="checkbox" name="enabled" checked /> Run on schedule
-          </label>
-          <ScheduleFields settings={p.settings} provider={p.provider} />
+          <TransactionFields settings={p.settings} provider={p.provider} />
+          <StatementFields settings={p.settings} provider={p.provider} />
           <details>
             <summary>Advanced</summary>
             <div class="stack" style="padding:12px 0 0">
@@ -832,10 +873,8 @@ export const ConnectionPage = (p: {
             </select>
           </label>
           {p.provider && <CredentialInputs fields={p.provider.credentialFields} setKeys={p.conn.credentialKeys} />}
-          <label class="check">
-            <input type="checkbox" name="enabled" checked={p.conn.enabled} /> Run on schedule
-          </label>
-          <ScheduleFields conn={p.conn} settings={p.settings} provider={p.provider} />
+          <TransactionFields conn={p.conn} settings={p.settings} provider={p.provider} />
+          <StatementFields conn={p.conn} settings={p.settings} provider={p.provider} />
           <details>
             <summary>Advanced</summary>
             <div class="stack" style="padding:12px 0 0">
@@ -1047,7 +1086,7 @@ export const RunPage = (p: { run: Run; shots: string[]; logs?: string[]; recordi
       {live && <CancelButton connectionId={p.run.connectionId} />}
     </div>
     <p class="muted">
-      {p.run.trigger} · started {p.run.startedAt}
+      {p.run.trigger}{p.run.kind === "statements" ? " · statements" : ""} · started {p.run.startedAt}
       {p.run.finishedAt && ` · finished ${p.run.finishedAt}`}
       <br />
       <span id="run-stats">{runStats(p.run)}</span>
