@@ -6,7 +6,7 @@
  */
 import { Cron } from "croner";
 
-export type ScheduleMode = "hourly" | "every" | "daily" | "weekdays" | "weekly" | "custom";
+export type ScheduleMode = "hourly" | "every" | "daily" | "weekdays" | "weekly" | "monthly" | "halfyearly" | "custom";
 
 export interface ScheduleSpec {
   mode: ScheduleMode;
@@ -18,14 +18,28 @@ export interface ScheduleSpec {
   everyHours: number;
   /** 0 = Sunday ... 6 = Saturday (mode "weekly") */
   weekday: number;
+  /** day of the month, 1-28 so it happens every month (modes "monthly", "halfyearly") */
+  dayOfMonth: number;
+  /** first of the two months, 1-6 (mode "halfyearly": this month and 6 later) */
+  month: number;
   /** raw cron (mode "custom") */
   cron: string;
 }
 
 export const EVERY_HOURS = [2, 3, 4, 6, 8, 12];
+export const MONTH_DAYS = Array.from({ length: 28 }, (_, i) => i + 1);
+export const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** "Jan and Jul" for month 1 */
+export const halfYearMonths = (m: number) => `${MONTHS[m - 1]} and ${MONTHS[m + 5]}`;
 export const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 const pad = (n: number) => String(n).padStart(2, "0");
+
+/** 1 -> "1st", 22 -> "22nd" */
+export function ordinal(n: number): string {
+  const suffix = n % 100 >= 11 && n % 100 <= 13 ? "th" : (["th", "st", "nd", "rd"][n % 10] ?? "th");
+  return `${n}${suffix}`;
+}
 
 export function buildCron(s: ScheduleSpec): string {
   switch (s.mode) {
@@ -39,6 +53,10 @@ export function buildCron(s: ScheduleSpec): string {
       return `${s.minute} ${s.hour} * * 1-5`;
     case "weekly":
       return `${s.minute} ${s.hour} * * ${s.weekday}`;
+    case "monthly":
+      return `${s.minute} ${s.hour} ${s.dayOfMonth} * *`;
+    case "halfyearly":
+      return `${s.minute} ${s.hour} ${s.dayOfMonth} ${s.month},${s.month + 6} *`;
     case "custom":
       return s.cron.trim().split(/\s+/).join(" ");
   }
@@ -47,13 +65,24 @@ export function buildCron(s: ScheduleSpec): string {
 /** Recognise the cron shapes the builder produces; anything else is "custom". */
 export function parseCron(expr: string): ScheduleSpec {
   const cron = expr.trim().split(/\s+/).join(" ");
-  const base: ScheduleSpec = { mode: "custom", minute: 0, hour: 6, everyHours: 6, weekday: 1, cron };
+  const base: ScheduleSpec = { mode: "custom", minute: 0, hour: 6, everyHours: 6, weekday: 1, dayOfMonth: 1, month: 1, cron };
   const f = cron.split(" ");
   if (f.length !== 5) return base;
   const [mi, h, dom, mon, dow] = f as [string, string, string, string, string];
   const num = (s: string, max: number) => (/^\d{1,2}$/.test(s) && Number(s) <= max ? Number(s) : null);
   const minute = num(mi, 59);
-  if (minute === null || dom !== "*" || mon !== "*") return base;
+  if (minute === null) return base;
+  if (dom !== "*") {
+    const day = num(dom, 28);
+    const hour = num(h, 23);
+    if (!day || hour === null || dow !== "*") return base;
+    if (mon === "*") return { ...base, mode: "monthly", minute, hour, dayOfMonth: day };
+    const half = /^(\d{1,2}),(\d{1,2})$/.exec(mon);
+    const m = Number(half?.[1]);
+    if (half && m >= 1 && m <= 6 && Number(half[2]) === m + 6) return { ...base, mode: "halfyearly", minute, hour, dayOfMonth: day, month: m };
+    return base;
+  }
+  if (mon !== "*") return base;
 
   if (h === "*" && dow === "*") return { ...base, mode: "hourly", minute };
   const every = /^\*\/(\d{1,2})$/.exec(h);
@@ -84,6 +113,10 @@ export function describeCron(expr: string): string {
       return `Weekdays at ${at}`;
     case "weekly":
       return `${WEEKDAYS[s.weekday]}s at ${at}`;
+    case "monthly":
+      return `Monthly on the ${ordinal(s.dayOfMonth)} at ${at}`;
+    case "halfyearly":
+      return `Every 6 months: the ${ordinal(s.dayOfMonth)} of ${halfYearMonths(s.month)} at ${at}`;
     case "custom":
       return `Custom (${s.cron})`;
   }

@@ -4,12 +4,16 @@ import { makeApp, setup } from "./helpers.js";
 
 describe("schedule", () => {
   it("round-trips builder shapes", () => {
-    for (const cron of ["15 * * * *", "0 */6 * * *", "30 6 * * *", "0 7 * * 1-5", "45 21 * * 0"]) {
+    for (const cron of ["15 * * * *", "0 */6 * * *", "30 6 * * *", "0 7 * * 1-5", "45 21 * * 0", "0 7 2 * *", "0 7 15 1,7 *"]) {
       expect(buildCron(parseCron(cron))).toBe(cron);
     }
     expect(parseCron("0 6 * * *")).toMatchObject({ mode: "daily", hour: 6, minute: 0 });
     expect(parseCron("0 */5 * * *").mode).toBe("custom"); // 5 isn't an offered interval
-    expect(parseCron("0 6 1 * *").mode).toBe("custom");
+    expect(parseCron("0 6 1 * *")).toMatchObject({ mode: "monthly", dayOfMonth: 1, hour: 6 });
+    expect(parseCron("0 6 31 * *").mode).toBe("custom"); // not every month has a 31st
+    expect(parseCron("0 6 1 * 1").mode).toBe("custom");
+    expect(parseCron("0 7 15 1,7 *")).toMatchObject({ mode: "halfyearly", month: 1, dayOfMonth: 15, hour: 7 });
+    expect(parseCron("0 7 15 1,8 *").mode).toBe("custom");
   });
 
   it("describes schedules in plain words", () => {
@@ -18,7 +22,10 @@ describe("schedule", () => {
     expect(describeCron("0 9 * * 0")).toBe("Sundays at 09:00");
     expect(describeCron("0 * * * *")).toBe("Every hour");
     expect(describeCron("0 */6 * * *")).toBe("Every 6 hours");
-    expect(describeCron("0 6 1 * *")).toBe("Custom (0 6 1 * *)");
+    expect(describeCron("0 6 1 * *")).toBe("Monthly on the 1st at 06:00");
+    expect(describeCron("30 7 22 * *")).toBe("Monthly on the 22nd at 07:30");
+    expect(describeCron("0 6 31 * *")).toBe("Custom (0 6 31 * *)");
+    expect(describeCron("0 7 15 1,7 *")).toBe("Every 6 months: the 15th of Jan and Jul at 07:00");
   });
 
   it("computes next runs in the configured timezone", () => {

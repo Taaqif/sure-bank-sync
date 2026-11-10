@@ -1,5 +1,5 @@
 import type { SyncPeriod } from "../../providers/base.js";
-import { EVERY_HOURS, WEEKDAYS, cronPreview, cronPreviewText, describeCron, parseCron, type ScheduleMode } from "../../schedule.js";
+import { EVERY_HOURS, MONTH_DAYS, WEEKDAYS, halfYearMonths, cronPreview, cronPreviewText, describeCron, ordinal, parseCron, type ScheduleMode } from "../../schedule.js";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -19,6 +19,8 @@ export function ScheduleField(p: { name: string; label: string; value: string | 
     ["daily", "Daily"],
     ["weekdays", "Weekdays"],
     ["weekly", "Weekly"],
+    ["monthly", "Monthly"],
+    ["halfyearly", "Every 6 months"],
     ["custom", "Custom (cron)"],
   );
   // Hidden server-side too, so the script doesn't shift the layout on load.
@@ -49,7 +51,21 @@ export function ScheduleField(p: { name: string; label: string; value: string | 
               </option>
             ))}
           </select>
-          <span data-show="daily weekdays weekly" class="row" style={hide("daily weekdays weekly")}>
+          <select data-s="halfmonth" data-show="halfyearly" style={`${hide("halfyearly")}width:auto`}>
+            {[1, 2, 3, 4, 5, 6].map((m) => (
+              <option value={String(m)} selected={m === spec.month}>
+                in {halfYearMonths(m)}
+              </option>
+            ))}
+          </select>
+          <select data-s="monthday" data-show="monthly halfyearly" style={`${hide("monthly halfyearly")}width:auto`}>
+            {MONTH_DAYS.map((d) => (
+              <option value={String(d)} selected={d === spec.dayOfMonth}>
+                on the {ordinal(d)}
+              </option>
+            ))}
+          </select>
+          <span data-show="daily weekdays weekly monthly halfyearly" class="row" style={hide("daily weekdays weekly monthly halfyearly")}>
             at <input type="time" data-s="time" value={`${pad(spec.hour)}:${pad(spec.minute)}`} style="width:auto" />
           </span>
           <span data-show="hourly every" class="row" style={hide("hourly every")}>
@@ -126,6 +142,8 @@ document.querySelectorAll("[data-schedule]").forEach((box) => {
       case "daily": return mm + " " + hh + " * * *";
       case "weekdays": return mm + " " + hh + " * * 1-5";
       case "weekly": return mm + " " + hh + " * * " + $("weekday").value;
+      case "monthly": return mm + " " + hh + " " + $("monthday").value + " * *";
+      case "halfyearly": return mm + " " + hh + " " + $("monthday").value + " " + $("halfmonth").value + "," + (Number($("halfmonth").value) + 6) + " *";
       default: return cron.value;
     }
   }
