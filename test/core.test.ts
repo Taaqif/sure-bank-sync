@@ -360,6 +360,38 @@ describe("redactHtml", async () => {
   });
 });
 
+describe("commbank csv", async () => {
+  const { parseCommbankCsv } = await import("../src/providers/commbank.js");
+  const acct = { id: "06 2000 12345678", name: "Smart Access", currency: "AUD" };
+  it("parses the headerless export (date, amount, description, balance)", () => {
+    const csv = '09/11/2026,"-4.50","EFTPOS CAFE, SYDNEY","+1,234.56"\r\n01/11/2026,"+2500.00","SALARY ACME","+1,239.06"\r\n';
+    expect(parseCommbankCsv(csv, acct)).toEqual([
+      { account: acct, date: "2026-11-09", amountCents: -450, description: "EFTPOS CAFE, SYDNEY" },
+      { account: acct, date: "2026-11-01", amountCents: 250000, description: "SALARY ACME" },
+    ]);
+  });
+  it("parses the headed export (Transaction Date, Description, Amount, Balance)", () => {
+    const csv = '"Transaction Date","Description","Amount","Balance"\n"10/11/2026","Transfer to xx0406 NetBank","-1500","1639.02"\n"09/11/2026","Salary","3131.99","3139.02"\n';
+    expect(parseCommbankCsv(csv, acct).map((t) => [t.date, t.amountCents, t.description])).toEqual([
+      ["2026-11-10", -150000, "Transfer to xx0406 NetBank"],
+      ["2026-11-09", 313199, "Salary"],
+    ]);
+  });
+  it("lists the financial years a range touches, newest first", async () => {
+    const { financialYears } = await import("../src/providers/commbank.js");
+    expect(financialYears("2026-09-26", "2026-11-10")).toEqual(["2026 - 2027"]);
+    expect(financialYears("2026-05-27", "2026-07-10")).toEqual(["2026 - 2027", "2025 - 2026"]);
+    expect(financialYears("2026-06-30", "2026-06-30")).toEqual(["2025 - 2026"]);
+  });
+  it("makes account ids from the home page number", async () => {
+    const { accountIdFromNumber } = await import("../src/providers/commbank.js");
+    expect(accountIdFromNumber(" 066-003  1036 0393 ")).toBe("066-003 1036 0393");
+  });
+  it("rejects junk", () => {
+    expect(() => parseCommbankCsv("what,is,this\nfoo,bar,baz\n", acct)).toThrow(/header/);
+  });
+});
+
 describe("sessions", async () => {
   const { createSession, verifySession, safeNext } = await import("../src/web/auth.js");
   it("signs, expires and invalidates when the binding changes", () => {

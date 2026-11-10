@@ -1,11 +1,12 @@
 import { amex } from "./amex.js";
 import { anz } from "./anz.js";
 import type { ProviderDefinition } from "./base.js";
+import { commbank } from "./commbank.js";
 import { demo } from "./demo.js";
 import { macquarie } from "./macquarie.js";
 
 export const PROVIDERS: Record<string, ProviderDefinition> = Object.fromEntries(
-  [anz, amex, macquarie, demo].map((p) => [p.name, p]),
+  [anz, amex, commbank, macquarie, demo].map((p) => [p.name, p]),
 );
 
 /**

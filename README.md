@@ -6,7 +6,7 @@ shared household: each person has their own Sure API key and bank logins,
 all managed from a small web UI.
 
 Supported banks: **ANZ Internet Banking** (AU), **American Express** (AU),
-**Macquarie Bank** (AU).
+**CommBank NetBank** (AU), **Macquarie Bank** (AU).
 `demo` is a fake bank for testing the pipeline.
 
 Stack: Node + TypeScript, Playwright, Hono (server-rendered JSX), SQLite via
@@ -187,6 +187,18 @@ stripped).
 Me, and reuses the remembered User ID), hands any CAPTCHA to you through the
 browser view and any identity check to the code box, then Dashboard → Recent
 Transactions → Download → CSV. Covers the current statement period.
+
+**CommBank NetBank (AU)**: logs in with client number + password (reuses a
+client number NetBank remembers, or replaces it if it's a different one),
+waits for you to approve the log on in the CommBank app (the browser view is
+open in case it asks for a code instead) and skips the "new look" welcome. Reads
+the accounts table on the home page, then for each account: Download
+transaction summary → types the From/To dates for the sync period → CSV →
+Download. Statements (optional, own schedule): View statements → each account →
+each financial year in range → downloads every statement PDF issued in the last
+200 days (statements are 6-monthly; the default statement schedule is the 15th
+of January and July). Sure has no statement upload API yet, so statement runs only log what
+they would send.
 
 **Macquarie Bank (AU)**: logs in with Macquarie ID + password, hands the
 "I'm not a robot" check (and anything it doesn't recognise) to you through the
