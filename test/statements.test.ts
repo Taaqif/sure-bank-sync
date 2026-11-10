@@ -85,6 +85,23 @@ describe("statements", () => {
     expect(page).toMatch(/<fieldset[^>]*disabled/);
   });
 
+  it("offers Transactions/Statements in the run bar and dry runs either", async () => {
+    const env = setup();
+    const { app, runner } = makeApp(env);
+    const id = demoConn(env, false);
+    const page = await (await get(app, `/connections/${id}`)).text();
+    expect(page).toMatch(/name="kind" value="transactions" checked/);
+    expect(page).toMatch(/name="kind" value="statements"\/>/); // enabled
+    expect(page).not.toContain("last 62 days");
+    const anz = await (await get(app, "/connections/alice-anz")).text();
+    expect(anz).toMatch(/name="kind" value="statements" disabled/);
+
+    await app.request(`/connections/${id}/run`, form({ kind: "statements", dryRun: "1" }));
+    while (runner.isRunning(id)) await new Promise((r) => setTimeout(r, 50));
+    const run = env.runs.page(id, 1).runs[0]!;
+    expect(run).toMatchObject({ kind: "statements", dryRun: true, status: "success" });
+  });
+
   it("saves the default statement schedule in settings", async () => {
     const env = setup();
     const { app } = makeApp(env);

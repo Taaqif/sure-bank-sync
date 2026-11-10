@@ -724,32 +724,58 @@ export const ConnectionNewPage = (p: {
   </Layout>
 );
 
-/** Connection title and run buttons (refreshed live). */
+/** Connection title and run bar (refreshed live). */
 export const ConnActions = (p: { conn: Connection; provider?: ProviderDefinition; running: boolean }) => {
   const ui = useContext(UiContext);
+  const statements = p.provider?.statements;
+  const label = p.provider?.label ?? p.conn.provider;
   return (
-    <div id="conn-actions" class="row between" data-running={p.running ? "1" : undefined}>
-      <h2>
-        {p.conn.userName} · {p.conn.id} <span class="muted">({p.provider?.label ?? p.conn.provider})</span>
-        {p.running && <LiveBadge title="A run is in progress; this page updates live" />}
-      </h2>
-      <div class="row">
-        <form method="post" action={`/connections/${p.conn.id}/run`} class="row">
+    <div id="conn-actions" data-running={p.running ? "1" : undefined}>
+      <div class="row between">
+        <h2>
+          {p.conn.userName} · {p.conn.id} <span class="muted">({label})</span>
+          {p.running && <LiveBadge title="A run is in progress; this page updates live" />}
+        </h2>
+        {p.running && <CancelButton connectionId={p.conn.id} />}
+      </div>
+      <form method="post" action={`/connections/${p.conn.id}/run`} class="card runbar">
+        <div class="seg" role="radiogroup" aria-label="What to import">
+          <label>
+            <input type="radio" name="kind" value="transactions" checked />
+            <span>Transactions</span>
+          </label>
+          <label title={statements ? undefined : `${label} can't import statements yet`}>
+            <input type="radio" name="kind" value="statements" disabled={!statements} />
+            <span>Statements</span>
+          </label>
+        </div>
+        <div class="row">
           {ui.debugTools && (
-            <button type="submit" class="secondary" name="debug" value="1" disabled={p.running} title="Dry run with a visible, slowed-down browser; captures network data and keeps downloads">
+            <button type="submit" class="secondary" name="debug" value="1" disabled={p.running} title="Dry run in a visible, slowed-down browser; keeps network data and downloaded files">
               Debug run
             </button>
           )}
-          <button type="submit" class="secondary" name="discover" value="1" disabled={p.running} title="Log in and list accounts to map; no transactions, nothing written">
-            Discover accounts
+          <button type="submit" class="secondary" name="dryRun" value="1" disabled={p.running} title="Fetch and log what would be sent; write nothing">
+            Dry run
           </button>
-          <button type="submit" class="secondary" name="dryRun" value="1" disabled={p.running} title="Scrape and log what would be sent, write nothing">
-            Dry run now
+          <button type="submit" disabled={p.running}>
+            {p.running ? "Running…" : "Run now"}
           </button>
-          <button type="submit" disabled={p.running}>{p.running ? "Running…" : "Run now"}</button>
-        </form>
-        {p.running && <CancelButton connectionId={p.conn.id} />}
-      </div>
+        </div>
+        <span class="sep" aria-hidden="true" />
+        <button type="submit" class="secondary" name="discover" value="1" disabled={p.running} title="Log in and list accounts to map; nothing fetched or written">
+          Discover accounts
+        </button>
+        <small class="hint">
+          <strong>Dry run</strong> fetches and logs what would be sent, writing nothing.
+          {ui.debugTools && (
+            <>
+              {" "}
+              <strong>Debug run</strong> is a dry run in a visible browser that keeps network data and downloads.
+            </>
+          )}
+        </small>
+      </form>
     </div>
   );
 };
@@ -781,13 +807,28 @@ const CONN_LIVE_JS = `
         for (const part of ["conn-actions", "conn-runs"]) {
           const fresh = doc.getElementById(part);
           const old = document.getElementById(part);
-          if (fresh && old && fresh.innerHTML !== old.innerHTML) old.replaceWith(fresh);
+          if (fresh && old && fresh.innerHTML !== old.innerHTML) {
+            old.replaceWith(fresh);
+            if (part === "conn-actions") restoreKind();
+          }
         }
       }
     } catch {}
     const running = !!document.querySelector("#conn-actions[data-running]");
     timer = setTimeout(poll, document.hidden ? 15000 : running ? 2000 : 10000);
   }
+  // Remember Transactions/Statements per connection (survives refreshes and reloads).
+  const key = "sbs-kind:" + id;
+  function restoreKind() {
+    let kind;
+    try { kind = sessionStorage.getItem(key); } catch {}
+    const input = kind && document.querySelector('#conn-actions input[name="kind"][value="' + kind + '"]');
+    if (input && !input.disabled) input.checked = true;
+  }
+  document.addEventListener("change", (e) => {
+    if (e.target.name === "kind") try { sessionStorage.setItem(key, e.target.value); } catch {}
+  });
+  restoreKind();
   window.refreshLive = () => { clearTimeout(timer); poll(); };
   timer = setTimeout(poll, 2000);
 })();`;

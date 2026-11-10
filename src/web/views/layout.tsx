@@ -85,6 +85,17 @@ fieldset.stack { display: grid; gap: 14px; padding: 12px 14px; margin: 0; border
 fieldset.stack legend { padding: 0 4px; font-weight: 600; }
 fieldset.stack > small { color: var(--muted); font-size: 12px; }
 fieldset:disabled { opacity: .6; }
+.runbar { display: flex; gap: 12px 16px; align-items: center; flex-wrap: wrap; padding: 12px; overflow: visible; }
+.runbar .sep { width: 1px; align-self: stretch; background: var(--line); }
+.runbar .hint { flex-basis: 100%; }
+.seg { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.seg label { position: relative; cursor: pointer; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg span { display: block; padding: 5px 14px; border-radius: 6px; font-weight: 500; line-height: 1.25; }
+.seg span small { display: block; font-size: 11px; font-weight: 400; color: var(--muted); }
+.seg input:checked + span { background: var(--card); box-shadow: inset 0 0 0 1px var(--line), 0 1px 3px rgba(0, 0, 0, .15); }
+.seg input:focus-visible + span { outline: 2px solid var(--run); outline-offset: 1px; }
+.seg input:disabled + span { opacity: .45; cursor: not-allowed; }
 .empty { padding: 24px 16px; color: var(--muted); }
 pre { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; font-size: 12px; white-space: pre-wrap; }
 .err { color: var(--bad); white-space: normal; max-width: 380px; overflow: hidden; text-overflow: ellipsis; }
