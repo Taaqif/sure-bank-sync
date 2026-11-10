@@ -25,7 +25,7 @@ import { parseAmount, type BankAccount, type BankStatement, type BankTransaction
 import { bankDate, dmyDate, parseCsv } from "./csv.js";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Locator, Page } from "playwright";
+import type { BrowserContext, Download, Locator, Page } from "playwright";
 import { AuthError, ProviderError, pause, settle, snapshot, type ProviderContext, type ProviderDefinition } from "./base.js";
 
 const LOGIN_URL = "https://netbank.web.commbank.com.au/auth/logon";
@@ -284,7 +284,7 @@ export const commbank: ProviderDefinition = {
           await pause(300, 700);
 
           ctx.log(`commbank: ${acct.name}: downloading ${range.since} to ${range.until} as CSV`);
-          const [dl] = await Promise.all([page.waitForEvent("download", { timeout: 60_000 }), dialog.locator(SEL.downloadFile).click()]);
+          const dl = await downloadReport(ctx, page, dialog, acct.name);
           // Playwright keeps downloads in a temp dir removed with the browser; only debug runs keep a copy.
           const file = await dl.path();
           if (ctx.debug) await dl.saveAs(join(ctx.debugDir, `commbank-${i}.csv`));
@@ -357,3 +357,54 @@ export const commbank: ProviderDefinition = {
     };
   },
 };
+
+/**
+ * Press Download in the transaction summary dialog and wait for the file.
+ * NetBank sometimes ignores the press or shows "We couldn't create your
+ * transaction summary"; both get a few more tries. Files that open in a new
+ * tab are caught too.
+ */
+async function downloadReport(ctx: ProviderContext, page: Page, dialog: Locator, account: string): Promise<Download> {
+  const errorDialog = page.locator('dialog[aria-describedby="transaction-summary-download-error-description"][open]');
+  // The count shows once NetBank has taken the dates in; pressing before that can be ignored.
+  await dialog.getByText(/This summary will show/i).first().waitFor({ timeout: 10_000 }).catch(() => {});
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const file = anyDownload(ctx.browser, 30_000);
+    if (attempt === 1 || !(await errorDialog.isVisible().catch(() => false))) await dialog.locator(SEL.downloadFile).click();
+    else await errorDialog.getByRole("button", { name: "Try again" }).click();
+    const outcome = await Promise.race([
+      file.wait,
+      errorDialog.waitFor({ timeout: 30_000 }).then(
+        () => "error" as const,
+        () => "nothing" as const,
+      ),
+    ]);
+    file.stop();
+    if (typeof outcome === "object") return outcome;
+    if (attempt === 3) break;
+    if (outcome === "error") ctx.log(`commbank: ${account}: NetBank couldn't create the summary, trying again shortly`);
+    else ctx.log(`commbank: ${account}: no file after pressing Download, pressing it again`);
+    await pause(5_000, 8_000);
+  }
+  await snapshot(ctx, "commbank-download");
+  throw new ProviderError(`CommBank: ${account}: the transaction summary didn't download after 3 tries`);
+}
+
+/** The next download from any tab of the browser (NetBank may open one for the file). */
+function anyDownload(browser: BrowserContext, timeoutMs: number): { wait: Promise<Download | "nothing">; stop: () => void } {
+  let done: (d: Download | "nothing") => void = () => {};
+  const wait = new Promise<Download | "nothing">((r) => (done = r));
+  const onDownload = (d: Download) => done(d);
+  const watch = (p: Page) => p.on("download", onDownload);
+  browser.pages().forEach(watch);
+  browser.on("page", watch);
+  const timer = setTimeout(() => done("nothing"), timeoutMs);
+  return {
+    wait,
+    stop: () => {
+      clearTimeout(timer);
+      browser.off("page", watch);
+      for (const p of browser.pages()) p.off("download", onDownload);
+    },
+  };
+}
