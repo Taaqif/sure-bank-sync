@@ -36,10 +36,13 @@ export class Scheduler {
       this.#jobs.set(jobKey(connectionId, kind), job);
       log.info(`scheduled ${connectionId}${kind === "statements" ? " statements" : ""}: ${expr} (${settings.timezone})`);
     };
-    // Transactions and statements are switched on separately.
+    // Transactions and statements are switched on separately, per connection
+    // and for everyone in Settings.
+    if (!settings.transactionSchedules) log.info("transaction schedules are off in Settings");
+    if (!settings.statementSchedules) log.info("statement schedules are off in Settings");
     for (const conn of this.store.connections()) {
-      if (conn.enabled) add(conn.id, "transactions", conn.schedule ?? settings.schedule);
-      if (conn.statementsEnabled && PROVIDERS[conn.provider]?.statements) {
+      if (settings.transactionSchedules && conn.enabled) add(conn.id, "transactions", conn.schedule ?? settings.schedule);
+      if (settings.statementSchedules && conn.statementsEnabled && PROVIDERS[conn.provider]?.statements) {
         add(conn.id, "statements", conn.statementSchedule ?? settings.statementSchedule);
       }
     }

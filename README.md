@@ -54,6 +54,8 @@ flowchart LR
   dry run, discover). Waiting runs show as **queued**; a run waiting for you
   hands its place to the next one. On a small server, set Browsers at once
   to 1.
+- **Pause schedules** for everyone in Settings: transaction syncs and
+  statement imports have their own switch. Run now still works.
 
 ## Quick start
 
@@ -186,8 +188,10 @@ stripped).
 
 **American Express (AU)**: logs in with User ID + password (ticks Remember
 Me, and reuses the remembered User ID), hands any CAPTCHA to you through the
-browser view and any identity check to the code box, then Dashboard → Recent
-Transactions → Download → CSV. Covers the current statement period.
+browser view and any identity check to the code box. Transactions come from
+the activity search page: it types the sync period into Date Range, presses
+Search and reads the posted transactions the page loads (any range, like the
+other banks), so it isn't limited to the current statement.
 
 **CommBank NetBank (AU)**: logs in with client number + password (reuses a
 client number NetBank remembers, or replaces it if it's a different one),

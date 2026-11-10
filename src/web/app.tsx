@@ -458,6 +458,8 @@ export function createApp(svc: Services) {
       sureSource: str(b, "sureSource"),
       timezone: str(b, "timezone"),
       schedule: str(b, "schedule"),
+      transactionSchedules: b.transactionSchedules === "on",
+      statementSchedules: b.statementSchedules === "on",
       statementSchedule: str(b, "statementSchedule"),
       skipPending: b.skipPending === "on",
       mfaTimeoutSeconds: str(b, "mfaTimeoutSeconds"),

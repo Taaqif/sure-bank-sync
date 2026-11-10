@@ -34,6 +34,38 @@ describe("statements", () => {
     expect(env.runs.get(runId)!.error).toMatch(/can't import statements yet/);
   });
 
+  it("turns schedules off for everyone from Settings, transactions and statements separately", async () => {
+    const env = setup();
+    const { app, scheduler } = makeApp(env);
+    const id = demoConn(env, true);
+    const save = (on: { transactionSchedules?: string; statementSchedules?: string }) =>
+      app.request("/settings", form({
+        sureUrl: "http://sure.test", timezone: "Australia/Melbourne", schedule: "0 6 * * *", statementSchedule: "0 7 15 1,7 *",
+        mfaTimeoutSeconds: "300", maxBrowsers: "2", ...on,
+      }, { Host: "localhost" }));
+    try {
+      await save({ transactionSchedules: "on", statementSchedules: "on" });
+      expect(scheduler.nextRun(id)).not.toBeNull();
+      expect(scheduler.nextRun(id, "statements")).not.toBeNull();
+      expect(await (await get(app, "/")).text()).not.toContain("are off");
+
+      await save({ statementSchedules: "on" });
+      expect(env.store.settings().transactionSchedules).toBe(false);
+      expect(scheduler.nextRun(id)).toBeNull();
+      expect(scheduler.nextRun(id, "statements")).not.toBeNull();
+      const dash = await (await get(app, "/")).text();
+      expect(dash).toContain("Scheduled transaction syncs are off");
+      expect(dash).toContain("Paused");
+
+      await save({});
+      expect(scheduler.nextRun(id, "statements")).toBeNull();
+      expect(await (await get(app, "/")).text()).toContain("Scheduled syncs and statement imports are off");
+      expect(await (await get(app, "/settings")).text()).toContain('name="transactionSchedules"');
+    } finally {
+      scheduler.stop();
+    }
+  });
+
   it("schedules statements separately, only when turned on and supported", () => {
     const env = setup();
     const { scheduler } = makeApp(env);

@@ -45,6 +45,10 @@ export const SettingsSchema = z.object({
     .transform((s) => s || "sure-bank-sync"),
   timezone: z.string().trim().refine(validTimezone, "unknown timezone"),
   schedule: z.string(),
+  /** off: no scheduled transaction runs for any connection (Run now still works) */
+  transactionSchedules: z.boolean(),
+  /** off: no scheduled statement runs for any connection */
+  statementSchedules: z.boolean(),
   /** default schedule for statement imports (connections that turn them on) */
   statementSchedule: z.string(),
   skipPending: z.boolean(),
@@ -65,6 +69,8 @@ export const DEFAULT_SETTINGS: Settings = {
   sureSource: "sure-bank-sync",
   timezone: "Australia/Melbourne",
   schedule: "0 6 * * *",
+  transactionSchedules: true,
+  statementSchedules: true,
   // Every 6 months, a week after banks issue half-yearly statements (early Jan / Jul).
   statementSchedule: "0 7 15 1,7 *",
   skipPending: true,

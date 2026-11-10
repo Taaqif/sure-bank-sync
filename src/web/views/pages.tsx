@@ -106,6 +106,17 @@ export function DashboardStatus(p: DashboardProps) {
           </div>
         ))}
 
+      {(!p.settings.transactionSchedules || !p.settings.statementSchedules) && (
+        <div class="flash">
+          {!p.settings.transactionSchedules && !p.settings.statementSchedules
+            ? "Scheduled syncs and statement imports are off"
+            : !p.settings.transactionSchedules
+              ? "Scheduled transaction syncs are off"
+              : "Scheduled statement imports are off"}{" "}
+          in <a href="/settings">Settings</a>. Runs only start when you press Run now.
+        </div>
+      )}
+
       <div class="row between">
         <h2>
           Connections
@@ -151,7 +162,7 @@ export function DashboardStatus(p: DashboardProps) {
                 <td>{ago(r.last?.startedAt)}</td>
                 <td>{ago(r.lastOk?.finishedAt)}</td>
                 <td class="muted">
-                  {formatWhen(r.nextRun, p.settings.timezone)}
+                  {p.settings.transactionSchedules || !r.conn.enabled ? formatWhen(r.nextRun, p.settings.timezone) : "Paused"}
                   <br />
                   <small>{r.scheduleLabel}</small>
                   {r.statementNextRun && (
@@ -295,10 +306,24 @@ export const SettingsPage = (p: { s: Settings; storage?: StorageInfo; msg?: stri
           <small>Used for schedules and "today", e.g. Australia/Melbourne.</small>
         </label>
         <ScheduleField name="schedule" label="Default schedule" value={p.s.schedule} timezone={p.s.timezone} />
+        <label class="check">
+          <input type="checkbox" name="transactionSchedules" checked={p.s.transactionSchedules} /> Run transaction syncs on
+          schedule
+        </label>
+        <small class="hint" style="margin-top:-10px">
+          Off: no connection syncs transactions on its own. Run now, dry runs and debug runs still work.
+        </small>
         <div>
           <ScheduleField name="statementSchedule" label="Default statement schedule" value={p.s.statementSchedule} timezone={p.s.timezone} />
           <small>For connections that import statements (banks that support it). Usually every 6 months.</small>
         </div>
+        <label class="check">
+          <input type="checkbox" name="statementSchedules" checked={p.s.statementSchedules} /> Run statement imports on
+          schedule
+        </label>
+        <small class="hint" style="margin-top:-10px">
+          Off: no connection imports statements on its own. You can still run them from a connection's page.
+        </small>
         <label>
           MFA timeout (seconds)
           <input type="number" name="mfaTimeoutSeconds" value={String(p.s.mfaTimeoutSeconds)} min="30" max="3600" required />
