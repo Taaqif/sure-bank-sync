@@ -257,15 +257,15 @@ describe("web", () => {
     expect(run.log.match(/waiting for you in the browser view/g)).toHaveLength(2);
   }, 60_000);
 
-  it("shows each bank's sync period choices, and a note for Amex", async () => {
+  it("shows each bank's sync period choices", async () => {
     const env = setup();
     const { app } = makeApp(env);
     const anz = await (await get(app, "/connections/new?provider=anz")).text();
     expect(anz).toContain("Bank default (last 14 days)");
     expect(anz).toContain("Last 120 days");
     const amex = await (await get(app, "/connections/new?provider=amex")).text();
-    expect(amex).toContain("Amex doesn&#39;t support choosing a sync period");
-    expect(amex).not.toContain('name="lookbackDays"');
+    expect(amex).toContain("Last 180 days");
+    expect(amex).toContain('name="lookbackDays"');
     expect(await (await get(app, "/settings")).text()).not.toContain("Sync period");
   });
 

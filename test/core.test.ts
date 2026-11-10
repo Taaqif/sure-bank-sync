@@ -421,41 +421,34 @@ describe("csv reader", async () => {
   });
 });
 
-describe("amex csv", async () => {
-  const { parseAmexCsv, amexDate, amexDashboardAccounts } = await import("../src/providers/amex.js");
-  it("lists the dashboard's cards with the same ids as the CSV rows", () => {
+describe("amex activity api", async () => {
+  const { parseAmexTransactions, amexDate, amexDashboardAccounts } = await import("../src/providers/amex.js");
+  it("lists the dashboard's cards with the same ids as the transactions", () => {
     const text = "Home\n-55501\nThe American Express® Explorer Credit Card\n••••55501\nRemaining Statement Balance";
     expect(amexDashboardAccounts(text)).toEqual([{ id: "amex-55501", name: "Amex ••55501", currency: "AUD" }]);
-    const csv = "Date,Description,Amount,Account #\n03/10/2026,COFFEE,4.50,XXXX-XXXXXX-55501\n";
-    expect(parseAmexCsv(csv, { id: "amex", name: "Amex card", currency: "AUD" })[0]!.account.id).toBe("amex-55501");
+    expect(parseAmexTransactions([{ charge_date: "2026-10-03", amount: 4.5, type: "DEBIT", display_account_number: "55501" }])[0]!.account.id).toBe(
+      "amex-55501",
+    );
     expect(amexDashboardAccounts("no cards here")).toEqual([]);
   });
-  const fallback = { id: "amex", name: "Amex card", currency: "AUD" };
-  it("parses the extended export, flipping signs and splitting cards", () => {
-    const csv = [
-      "Date,Date Processed,Description,Card Member,Account #,Amount,Extended Details,Appears On Your Statement As,Address,Town/City,Postcode,Country,Reference,Category",
-      `03/10/2026,04/10/2026,WOOLWORTHS 1234 SYDNEY,A PERSON,-12345,"1,204.50","line one\nline two",WOOLWORTHS,"1 MAIN ST\nSYDNEY",,,,'AT2627700110000100',General Purchases-Groceries`,
-      `05/10/2026,05/10/2026,PAYMENT RECEIVED - THANK YOU,A PERSON,-12345,-500.00,,,,,,,'AT2627800220000200',`,
-      `06/10/2026,06/10/2026,CAFE,B PERSON,-67890,4.50,,,,,,,,`,
-    ].join("\n");
-    const out = parseAmexCsv(csv, fallback);
+  it("turns charges into money out, credits into money in, one account per card", () => {
+    const out = parseAmexTransactions([
+      { reference_id: "AT262860004000010159546", identifier: "AT262860004000010159546---0005---20261011", description: "PAYPAL *CARINADAYNI   CAR", charge_date: "2026-10-11", post_date: "2026-10-13", amount: 329.99, type: "DEBIT", display_account_number: "21002" },
+      { reference_id: "AT2627800220000200", description: "PAYMENT RECEIVED - THANK YOU", charge_date: "2026-10-05", amount: 500, type: "CREDIT", display_account_number: "21002" },
+      { description: "CAFE", charge_date: "2026-10-06", amount: 4.5, type: "DEBIT", display_account_number: "67890" },
+    ]);
     expect(out.map((t) => [t.account.id, t.date, t.amountCents, t.description, t.bankId])).toEqual([
-      ["amex-12345", "2026-10-03", -120450, "WOOLWORTHS 1234 SYDNEY", "AT2627700110000100"],
-      ["amex-12345", "2026-10-05", 50000, "PAYMENT RECEIVED - THANK YOU", "AT2627800220000200"],
+      ["amex-21002", "2026-10-11", -32999, "PAYPAL *CARINADAYNI CAR", "AT262860004000010159546"],
+      ["amex-21002", "2026-10-05", 50000, "PAYMENT RECEIVED - THANK YOU", "AT2627800220000200"],
       ["amex-67890", "2026-10-06", -450, "CAFE", undefined],
     ]);
     expect(out[0]!.account).toBe(out[1]!.account);
-    expect(out[0]!.account.name).toBe("Amex ••12345");
-  });
-  it("uses the fallback account without an account column", () => {
-    const [t] = parseAmexCsv("Date,Description,Amount\n1/10/2026,UBER *TRIP,15.00\n", fallback);
-    expect(t).toMatchObject({ account: fallback, date: "2026-10-01", amountCents: -1500 });
+    expect(out[0]!.account.name).toBe("Amex ••21002");
   });
   it("reads other date styles and rejects junk", () => {
     expect(amexDate("3 Oct 2026")).toBe("2026-10-03");
     expect(amexDate("03 Sept. 2026")).toBe("2026-09-03");
-    expect(() => parseAmexCsv("Date,Description,Amount\nsoon,X,1.00", fallback)).toThrow(/bad date/);
-    expect(() => parseAmexCsv("what,is,this\n1,2,3", fallback)).toThrow(/header/);
+    expect(() => parseAmexTransactions([{ charge_date: "soon", amount: 1, type: "DEBIT" }])).toThrow(/unexpected/);
   });
 });
 
@@ -506,11 +499,12 @@ describe("amex remembered user id", async () => {
 
 describe("sync period", async () => {
   const { syncDays, syncLabel } = await import("../src/providers/index.js");
-  it("uses the connection's choice, else the bank default; Amex is fixed", () => {
+  it("uses the connection's choice, else the bank default", () => {
     expect(syncDays({ provider: "anz", lookbackDays: null })).toBe(14);
     expect(syncDays({ provider: "anz", lookbackDays: 60 })).toBe(60);
     expect(syncLabel({ provider: "anz", lookbackDays: 30 })).toBe("last 30 days");
-    expect(syncLabel({ provider: "amex", lookbackDays: 60 })).toBe("current statement");
+    expect(syncLabel({ provider: "amex", lookbackDays: 60 })).toBe("last 60 days");
+    expect(syncDays({ provider: "amex", lookbackDays: null })).toBe(14);
   });
 });
 
