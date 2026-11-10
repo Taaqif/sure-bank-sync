@@ -83,13 +83,31 @@ export async function settle(page: Page, opts: { maxMs?: number; quietMs?: numbe
   await pause(300, 700);
 }
 
+/**
+ * Make a saved page safe to keep: drop the value of every password box (some
+ * sites mirror typed text into the value attribute) and replace stored login
+ * values (raw or HTML-escaped) with {{field}}. Short values are left alone so
+ * ordinary text isn't mangled.
+ */
+export function redactHtml(html: string, credentials: Record<string, string>): string {
+  let out = html.replace(/<input\b[^>]*>/gi, (tag) =>
+    /\btype\s*=\s*["']?password/i.test(tag) ? tag.replace(/\svalue\s*=\s*("[^"]*"|'[^']*'|[^\s>]*)/gi, "") : tag,
+  );
+  const esc = (v: string) => v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  for (const [key, value] of Object.entries(credentials)) {
+    if (!value || value.length < 4) continue;
+    for (const v of new Set([value, esc(value), esc(value).replace(/&quot;/g, "&#34;")])) out = out.split(v).join(`{{${key}}}`);
+  }
+  return out;
+}
+
 /** Save screenshot + HTML of every open page. Call liberally when debugging selectors. */
 export async function snapshot(ctx: ProviderContext, name: string): Promise<void> {
   await mkdir(ctx.debugDir, { recursive: true });
   for (const [i, page] of ctx.browser.pages().entries()) {
     // HTML first: it's cheap and still works when a busy page can't be screenshotted.
     try {
-      await writeFile(join(ctx.debugDir, `${name}-${i}.html`), await page.content());
+      await writeFile(join(ctx.debugDir, `${name}-${i}.html`), redactHtml(await page.content(), ctx.credentials));
     } catch (e) {
       ctx.log(`snapshot ${name}: couldn't save the page: ${(e as Error).message.split("\n")[0]}`);
     }

@@ -10,6 +10,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { BrowserContext, Page } from "playwright";
+import { redactHtml } from "./providers/base.js";
 
 export type SelectorCandidate =
   | { kind: "testid"; attr: string; value: string }
@@ -271,7 +272,7 @@ export async function startRecording(browser: BrowserContext, o: RecorderOptions
       try {
         await page.screenshot({ path: join(o.dir, `${name}.png`) });
         s.shot = `${name}.png`;
-        await writeFile(join(o.dir, `${name}.html`), await page.content());
+        await writeFile(join(o.dir, `${name}.html`), redactHtml(await page.content(), o.credentials));
         s.htmlFile = `${name}.html`;
       } catch {
         // page navigated or closed mid-capture

@@ -350,6 +350,16 @@ describe("anz csv", async () => {
   });
 });
 
+describe("redactHtml", async () => {
+  const { redactHtml } = await import("../src/providers/base.js");
+  it("drops password box values and replaces stored login values", () => {
+    const html = '<input id="password" type="password" value="pa&quot;ss1"><input id="c" type="text" value="62541234"><p>pa"ss1</p><b>abc</b>';
+    expect(redactHtml(html, { client_number: "62541234", password: 'pa"ss1', pin: "abc" })).toBe(
+      '<input id="password" type="password"><input id="c" type="text" value="{{client_number}}"><p>{{password}}</p><b>abc</b>',
+    );
+  });
+});
+
 describe("sessions", async () => {
   const { createSession, verifySession, safeNext } = await import("../src/web/auth.js");
   it("signs, expires and invalidates when the binding changes", () => {
