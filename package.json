@@ -1,6 +1,6 @@
 {
   "name": "sure-bank-sync",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Scheduled bank transaction scraper that syncs into a self-hosted Sure instance",
   "private": true,
   "type": "module",
