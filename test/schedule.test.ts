@@ -49,9 +49,9 @@ describe("schedule", () => {
     expect(settings).toContain("data-schedule");
     const conn = await (await app.request("/connections/alice-anz", { headers: { Host: "localhost" } })).text();
     expect(conn).toContain("Use default (Daily at 06:00)");
-    expect(conn).toContain("Bank default (last 14 days)");
+    expect(conn).toContain("Default (last 7 days)");
     expect(conn).not.toContain("Debug run"); // only with SURE_SYNC_DEBUG=1
     const home = await (await app.request("/", { headers: { Host: "localhost" } })).text();
-    expect(home).toContain("Daily at 06:00 · last 14 days");
+    expect(home).toContain("Daily at 06:00 · last 7 days");
   });
 });

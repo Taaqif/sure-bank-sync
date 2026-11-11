@@ -1,14 +1,14 @@
 import type { BankAccountRow, Run } from "../../db/schema.js";
 import type { RunsPage } from "../../runs.js";
 import type { MfaRequest } from "../../mfa.js";
-import { syncLabel, type ProviderDefinition } from "../../providers/index.js";
+import { ALL_TIME, periodChoices, syncLabel, type ProviderDefinition } from "../../providers/index.js";
 import type { Connection, Settings, User } from "../../store.js";
 import type { SureAccount } from "../../sureClient.js";
 import { useContext } from "hono/jsx";
 import { BareLayout, Layout, NeedsBrowser, UiContext, Version } from "./layout.js";
 import { RECIPE_SUGGESTIONS, type RecordedStep, type Recording } from "../../recorder.js";
 import { Badge, CredentialInputs, RunsTable, ago, formatWhen } from "./parts.js";
-import { LookbackField, SCHEDULE_JS, ScheduleField } from "./schedule.js";
+import { LookbackField, SCHEDULE_JS, ScheduleField, periodLabel } from "./schedule.js";
 
 // --- dashboard -------------------------------------------------------------
 
@@ -853,33 +853,33 @@ const RunDialog = (p: { conn: Connection; provider?: ProviderDefinition; setting
  */
 const RunPeriodField = (p: { conn: Connection; provider?: ProviderDefinition }) => {
   const period = p.provider?.syncPeriod;
-  if (!period || "fixed" in period) return null;
-  const days = (n: number) => (n === 1 ? "Last 1 day" : `Last ${n} days`);
+  if (!period) return null;
   return (
     <div class="period">
       <label>
         Period
         <select name="period">
           <option value="">Saved setting ({syncLabel(p.conn)})</option>
-          {period.choices.map((n) => (
-            <option value={String(n)}>{days(n)}</option>
+          {periodChoices(period).map((n) => (
+            <option value={String(n)}>{periodLabel(n)}</option>
           ))}
-          {period.allTime && <option value="all">All time</option>}
-          {period.customRange && <option value="custom">Custom dates…</option>}
+          {period.allTime && <option value="all">{periodLabel(ALL_TIME)}</option>}
+          <option value="custom">Custom dates…</option>
         </select>
-        <small>For this run only; the connection's saved period stays the same. Statements use their own lookback when left on the saved setting.</small>
+        <small>
+          For this run only; the connection's saved period stays the same. Statements use their own lookback when left on the saved setting.
+          {period.note ? ` ${period.note}` : ""}
+        </small>
       </label>
-      {period.customRange && (
-        <div class="custom-range row">
-          <label>
-            From <input type="date" name="since" />
-          </label>
-          <label>
-            To <input type="date" name="until" />
-            <small>empty: today</small>
-          </label>
-        </div>
-      )}
+      <div class="custom-range row">
+        <label>
+          From <input type="date" name="since" />
+        </label>
+        <label>
+          To <input type="date" name="until" />
+          <small>empty: today</small>
+        </label>
+      </div>
     </div>
   );
 };

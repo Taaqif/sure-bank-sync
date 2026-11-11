@@ -149,7 +149,7 @@ export const commbank: ProviderDefinition = {
     { key: "password", label: "Password", secret: true },
   ],
   startUrl: LOGIN_URL,
-  syncPeriod: { choices: [7, 14, 30, 60, 90], default: 14, customRange: true },
+  syncPeriod: {},
   // Six-monthly runs look back a little over six months, so a late run still catches the last statement.
   statements: { lookbackDays: 200, note: "PDF statements, by the date NetBank issued them." },
   create: (ctx: ProviderContext) => {

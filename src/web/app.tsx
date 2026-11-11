@@ -8,7 +8,7 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { Child } from "hono/jsx";
 import { clearLogFile, logFileBytes, logger, tailLog } from "../log.js";
 import { RETRY, type MfaBroker } from "../mfa.js";
-import { ALL_TIME, PROVIDERS, syncLabel, type SyncPeriod } from "../providers/index.js";
+import { ALL_TIME, PROVIDERS, periodChoices, syncLabel, type SyncPeriod } from "../providers/index.js";
 import { DEBUG_TOOLS, dateRange, type Runner, type RunPeriod } from "../runner.js";
 import { RECIPE_RE, type Recording } from "../recorder.js";
 import { cronPreview, describeCron } from "../schedule.js";
@@ -97,13 +97,12 @@ const isDate = (d: string) => ISO_DATE.test(d) && new Date(`${d}T00:00:00Z`).toI
 export function runPeriod(b: Body, period: SyncPeriod | undefined, tz: string): RunPeriod | undefined {
   const v = str(b, "period");
   if (!v) return undefined;
-  if (!period || "fixed" in period) throw new ValidationError("this bank decides its own period");
+  if (!period) throw new ValidationError("unknown bank");
   if (v === "all") {
     if (!period.allTime) throw new ValidationError("this bank can't fetch all time");
     return { days: ALL_TIME };
   }
   if (v === "custom") {
-    if (!period.customRange) throw new ValidationError("this bank can't fetch custom dates");
     const since = str(b, "since");
     const until = str(b, "until") || dateRange(tz, 0).until;
     if (!isDate(since)) throw new ValidationError("pick a From date");
@@ -113,7 +112,7 @@ export function runPeriod(b: Body, period: SyncPeriod | undefined, tz: string): 
     return { since, until };
   }
   const days = Number(v);
-  if (!period.choices.includes(days)) throw new ValidationError("pick a period from the list");
+  if (!periodChoices(period).includes(days)) throw new ValidationError("pick a period from the list");
   return { days };
 }
 
@@ -611,7 +610,6 @@ export function createApp(svc: Services) {
       // Banks without statement support post nothing here (the fields are disabled).
       statementsEnabled: !!def.statements && b.statementsEnabled === "on",
       statementSchedule: str(b, "statementSchedule") || null,
-      // Banks with a fixed period ignore any stored choice.
       lookbackDays: lookbackChoice(lookback, def.syncPeriod),
       credentials: Object.fromEntries(def.credentialFields.map((f) => [f.key, str(b, `cred_${f.key}`).trim()])),
       options: options as Record<string, unknown>,
@@ -620,9 +618,10 @@ export function createApp(svc: Services) {
 
   /** The picked sync period, or null for the bank default. */
   function lookbackChoice(value: string, period: SyncPeriod): number | null {
-    if (!value || "fixed" in period) return null;
+    if (!value) return null;
     const days = Number(value);
     if (days === ALL_TIME && !period.allTime) throw new ValidationError("this bank can't sync all time");
+    if (days !== ALL_TIME && (!Number.isInteger(days) || days < 1)) throw new ValidationError("pick a sync period from the list");
     return days;
   }
 

@@ -191,17 +191,29 @@ export interface StatementSupport {
   note?: string;
 }
 
-export type SyncPeriod =
-  | {
-      choices: number[];
-      default: number;
-      note?: string;
-      /** offer "All time" too (stored as ALL_TIME), e.g. for a first import */
-      allTime?: boolean;
-      /** fetchTransactions honours any since/until, so a run can ask for exact dates */
-      customRange?: boolean;
-    }
-  | { fixed: string; label: string };
+/**
+ * The period choices every bank offers, in days, up to a year. Banks don't
+ * pick their own list: a bank only says how far back it can go (maxDays) and
+ * whether it can fetch all time (adds "All time"). Custom dates are offered
+ * for every bank, so fetchTransactions must honour any since/until within maxDays.
+ */
+export const PERIOD_CHOICES = [7, 14, 30, 60, 90, 180, 365];
+/** Days fetched when a connection doesn't choose a period (same for every bank). */
+export const DEFAULT_PERIOD_DAYS = 7;
+
+export interface SyncPeriod {
+  /** furthest back the bank goes, in days: longer choices are hidden and custom dates are trimmed */
+  maxDays?: number;
+  /** offer "All time" too (stored as ALL_TIME), e.g. for a first import */
+  allTime?: boolean;
+  /** shown under the period picker */
+  note?: string;
+}
+
+/** The standard day choices this bank can serve ("All time" is added separately when allTime). */
+export function periodChoices(p: SyncPeriod): number[] {
+  return PERIOD_CHOICES.filter((d) => !p.maxDays || d <= p.maxDays);
+}
 
 /** Stored sync period meaning "everything the bank has". */
 export const ALL_TIME = 0;
@@ -217,11 +229,7 @@ export interface ProviderDefinition {
   note?: string;
   /** login fields the UI asks for; all are required */
   credentialFields: CredentialField[];
-  /**
-   * How much history a run fetches. Either day choices that make sense for
-   * this bank (with a default), or `fixed`: the bank decides, explained in a
-   * short note shown instead of the picker.
-   */
+  /** How far back this bank can fetch (choices and default are standard: see PERIOD_CHOICES). */
   syncPeriod: SyncPeriod;
   /**
    * Set when the bank can import statements (fetchStatements), on their own

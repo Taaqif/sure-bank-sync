@@ -389,13 +389,24 @@ export class Runner {
       const p = flags.period;
       const days = p && "days" in p ? (p.days === ALL_TIME ? ALL_TIME_DAYS : p.days) : statements ? def.statements!.lookbackDays : syncDays(conn);
       const range = p && "since" in p ? { since: p.since, until: p.until } : dateRange(settings.timezone, days);
+      // Every bank gets the same choices; ones with a history limit get the range trimmed to it.
+      const maxDays = def.syncPeriod.maxDays;
+      if (!statements && maxDays) {
+        const earliest = new Date(`${range.until}T00:00:00Z`);
+        earliest.setUTCDate(earliest.getUTCDate() - maxDays);
+        const floor = earliest.toISOString().slice(0, 10);
+        if (range.since < floor) {
+          rlog(`${def.label} keeps ${maxDays} days of history; fetching from ${floor}`);
+          range.since = floor;
+        }
+      }
       if (p) rlog("PERIOD: chosen for this run only (the connection's setting is unchanged)");
       if (statements) rlog("STATEMENTS: importing bank statements, not transactions");
       if (flags.train) rlog(`TRAIN: recording recipe "${flags.train.recipe}"; nothing fetched or written`);
       else if (flags.debug) rlog("DEBUG RUN: visible browser, network capture and downloads kept; nothing written to Sure");
       if (discover) rlog("DISCOVER: listing accounts only, no transactions fetched");
       else if (dryRun) rlog("DRY RUN: nothing will be written to Sure");
-      const allTime = !(p && "since" in p) && days === ALL_TIME_DAYS;
+      const allTime = !(p && "since" in p) && days === ALL_TIME_DAYS && !maxDays;
       rlog(`${conn.provider}, ${allTime ? `all time → ${range.until}` : `${range.since} → ${range.until}`}`);
       const bank = this.#bankLock(conn.provider);
       if (!bank.available) rlog(`waiting for another ${def.label} run to finish (one per bank at a time)`);

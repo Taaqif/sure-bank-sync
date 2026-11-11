@@ -26,7 +26,7 @@ export const demo: ProviderDefinition = {
   name: "demo",
   label: "Demo bank (testing)",
   credentialFields: [],
-  syncPeriod: { choices: [1, 3, 7, 14, 30], default: 7, customRange: true },
+  syncPeriod: {},
   statements: { lookbackDays: 62, note: "Demo: a tiny fake PDF per account for each month." },
   create: (ctx) => ({
     async login() {

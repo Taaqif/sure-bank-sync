@@ -499,12 +499,12 @@ describe("amex remembered user id", async () => {
 
 describe("sync period", async () => {
   const { syncDays, syncLabel } = await import("../src/providers/index.js");
-  it("uses the connection's choice, else the bank default", () => {
-    expect(syncDays({ provider: "anz", lookbackDays: null })).toBe(14);
+  it("uses the connection's choice, else the standard 7-day default", () => {
+    expect(syncDays({ provider: "anz", lookbackDays: null })).toBe(7);
     expect(syncDays({ provider: "anz", lookbackDays: 60 })).toBe(60);
     expect(syncLabel({ provider: "anz", lookbackDays: 30 })).toBe("last 30 days");
     expect(syncLabel({ provider: "amex", lookbackDays: 60 })).toBe("last 60 days");
-    expect(syncDays({ provider: "amex", lookbackDays: null })).toBe(14);
+    expect(syncDays({ provider: "amex", lookbackDays: null })).toBe(7);
   });
 });
 
@@ -531,9 +531,14 @@ describe("anz date range", async () => {
   it("types dates as DD/MM/YYYY", () => {
     expect(anzDmy("2026-01-05")).toBe("05/01/2026");
   });
-  it("keeps ranges within ANZ's 2 years", () => {
-    expect(anzRange({ since: "2026-01-01", until: "2026-11-11" })).toEqual({ since: "2026-01-01", until: "2026-11-11", clamped: false });
-    expect(anzRange({ since: "2020-01-01", until: "2026-11-11" })).toEqual({ since: "2024-11-11", until: "2026-11-11", clamped: true });
+  it("keeps ranges within what ANZ accepts: up to yesterday, 2 years back", () => {
+    const today = "2026-11-12";
+    expect(anzRange({ since: "2026-01-01", until: "2026-11-10" }, today)).toEqual({ since: "2026-01-01", until: "2026-11-10", notes: [] });
+    const r = anzRange({ since: "2026-10-13", until: "2026-11-12" }, today);
+    expect(r).toMatchObject({ since: "2026-10-13", until: "2026-11-11" });
+    expect(r.notes[0]).toMatch(/up to yesterday/);
+    expect(anzRange({ since: "2020-01-01", until: "2026-11-11" }, today)).toMatchObject({ since: "2024-11-11", until: "2026-11-11" });
+    expect(anzRange({ since: "2026-11-12", until: "2026-11-12" }, today)).toMatchObject({ since: "2026-11-11", until: "2026-11-11" });
   });
 });
 

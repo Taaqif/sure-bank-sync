@@ -1,4 +1,7 @@
-import { ALL_TIME, type SyncPeriod } from "../../providers/base.js";
+import { ALL_TIME, DEFAULT_PERIOD_DAYS, periodChoices, type SyncPeriod } from "../../providers/base.js";
+
+/** "Last 14 days" / "All time": one wording for every period picker. */
+export const periodLabel = (n: number) => (n === ALL_TIME ? "All time" : n === 1 ? "Last 1 day" : `Last ${n} days`);
 import { EVERY_HOURS, MONTH_DAYS, WEEKDAYS, halfYearMonths, cronPreview, cronPreviewText, describeCron, ordinal, parseCron, type ScheduleMode } from "../../schedule.js";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -91,25 +94,18 @@ export function ScheduleField(p: { name: string; label: string; value: string | 
  */
 export function LookbackField(p: { name: string; value: number | null; period: SyncPeriod }) {
   const period = p.period;
-  if ("fixed" in period) {
-    return (
-      <div>
-        <strong>Sync period</strong>
-        <div class="note">{period.fixed}</div>
-      </div>
-    );
-  }
-  const choices = [...period.choices];
+  const choices = periodChoices(period);
+  // A saved period from before the standard list keeps working.
   if (p.value && !choices.includes(p.value)) choices.push(p.value);
   choices.sort((a, b) => a - b);
   if (period.allTime) choices.push(ALL_TIME);
-  const days = (n: number) => (n === ALL_TIME ? "All time" : n === 1 ? "Last 1 day" : `Last ${n} days`);
+  const days = periodLabel;
   return (
     <label>
       Sync period
       <select name={p.name}>
         <option value="" selected={p.value === null}>
-          Bank default ({days(period.default).toLowerCase()})
+          Default ({days(DEFAULT_PERIOD_DAYS).toLowerCase()})
         </option>
         {choices.map((n) => (
           <option value={String(n)} selected={n === p.value}>

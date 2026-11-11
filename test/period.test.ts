@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PROVIDERS } from "../src/providers/index.js";
+import { DEFAULT_PERIOD_DAYS, PERIOD_CHOICES, PROVIDERS, periodChoices, type ProviderDefinition } from "../src/providers/index.js";
 import { runPeriod } from "../src/web/app.js";
 import { makeApp, setup } from "./helpers.js";
 
@@ -16,7 +16,7 @@ function demoConn(env: ReturnType<typeof setup>) {
 describe("run period", () => {
   const tz = "Australia/Melbourne";
   const demo = PROVIDERS.demo!.syncPeriod;
-  const noCustom = { choices: [7, 14], default: 7 };
+  const anz = PROVIDERS.anz!.syncPeriod;
   const stake = PROVIDERS.stake!.syncPeriod;
 
   it("parses the period picked on Run now", () => {
@@ -32,14 +32,39 @@ describe("run period", () => {
   it("rejects choices the bank doesn't offer and bad dates", () => {
     expect(() => runPeriod({ period: "13" }, demo, tz)).toThrow(/from the list/);
     expect(() => runPeriod({ period: "all" }, demo, tz)).toThrow(/all time/);
-    expect(() => runPeriod({ period: "custom", since: "2025-01-01" }, noCustom, tz)).toThrow(/custom dates/);
+    expect(() => runPeriod({ period: "730" }, stake, tz)).toThrow(/from the list/); // longer: All time or custom dates
     expect(() => runPeriod({ period: "custom", since: "" }, demo, tz)).toThrow(/From date/);
     expect(() => runPeriod({ period: "custom", since: "2025-02-30" }, demo, tz)).toThrow(/From date/);
     expect(() => runPeriod({ period: "custom", since: "2025-03-01", until: "2025-01-01" }, demo, tz)).toThrow(/on or before/);
     expect(() => runPeriod({ period: "custom", since: "2025-01-01", until: "2999-01-01" }, demo, tz)).toThrow(/future/);
   });
 
-  it("offers custom dates for banks that can search any range", async () => {
+  it("gives every bank the same choices, trimmed to how far back it goes", () => {
+    for (const p of Object.values(PROVIDERS)) expect(periodChoices(p.syncPeriod)).toEqual(PERIOD_CHOICES);
+    expect(PERIOD_CHOICES.at(-1)).toBe(365);
+    expect(PERIOD_CHOICES).toContain(DEFAULT_PERIOD_DAYS);
+    expect(DEFAULT_PERIOD_DAYS).toBe(7);
+  });
+
+  it("trims a run to the bank's history limit", async () => {
+    const env = setup();
+    const { runner } = makeApp(env);
+    const demoDef = PROVIDERS.demo!;
+    PROVIDERS.short = { ...demoDef, name: "short", label: "Short bank", syncPeriod: { maxDays: 30 } } as ProviderDefinition;
+    try {
+      const id = env.store.saveConnection(null, {
+        userId: env.userId, provider: "short", enabled: true, schedule: null, lookbackDays: null, credentials: {}, options: {},
+      });
+      const runId = await runner.run(id, "manual", { dryRun: true, period: { since: "2020-01-01", until: "2025-03-31" } });
+      const run = env.runs.get(runId)!;
+      expect(run.log).toContain("Short bank keeps 30 days of history; fetching from 2025-03-01");
+      expect(run.log).toContain("2025-03-01 → 2025-03-31");
+    } finally {
+      delete PROVIDERS.short;
+    }
+  });
+
+  it("offers custom dates for every bank", async () => {
     const env = setup();
     const { app } = makeApp(env);
     const id = demoConn(env);

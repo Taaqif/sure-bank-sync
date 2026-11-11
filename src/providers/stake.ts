@@ -53,10 +53,7 @@ export const stake: ProviderDefinition = {
     },
   ],
   syncPeriod: {
-    choices: [30, 90, 365, 1095],
-    default: 90,
     allTime: true,
-    customRange: true,
     note: "Use All time for a first import of your whole history, then switch back: anything already in Sure is skipped either way.",
   },
   startUrl: APP_URL,

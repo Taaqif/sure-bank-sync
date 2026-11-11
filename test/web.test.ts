@@ -262,8 +262,9 @@ describe("web", () => {
     const env = setup();
     const { app } = makeApp(env);
     const anz = await (await get(app, "/connections/new?provider=anz")).text();
-    expect(anz).toContain("Bank default (last 14 days)");
-    expect(anz).toContain("Last 730 days");
+    expect(anz).toContain("Default (last 7 days)");
+    expect(anz).toContain("Last 365 days");
+    expect(anz).not.toContain("Last 730 days");
     const amex = await (await get(app, "/connections/new?provider=amex")).text();
     expect(amex).toContain("Last 180 days");
     expect(amex).toContain('name="lookbackDays"');
@@ -307,7 +308,7 @@ describe("web", () => {
     expect(syncLabel(conn)).toBe("all time");
     expect(syncDays(conn)).toBe(ALL_TIME_DAYS);
     // A bank without All time falls back to its default.
-    expect(syncDays({ provider: "anz", lookbackDays: 0 })).toBe(14);
+    expect(syncDays({ provider: "anz", lookbackDays: 0 })).toBe(7);
     expect(await (await get(app, `/connections/${id}`)).text()).toMatch(/<option value="0" selected="">All time<\/option>/);
   });
 

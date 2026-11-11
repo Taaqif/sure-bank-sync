@@ -128,7 +128,7 @@ export const macquarie: ProviderDefinition = {
   // The transactions date filter takes any range, so any period works.
   startUrl: LOGIN_URL,
   optionsHint: `Macquarie: {"browserName": "Sure Bank Sync"} sets the nickname given when trusting this browser (letters, numbers, quotes, colons and spaces).`,
-  syncPeriod: { choices: [7, 14, 30, 60, 90, 180, 365], default: 14, customRange: true },
+  syncPeriod: {},
   create: (ctx: ProviderContext) => {
     // Full API responses hold account data: only capture them on debug runs.
     if (ctx.debug) captureJson(ctx, HOST);

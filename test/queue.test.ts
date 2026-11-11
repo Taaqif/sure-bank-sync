@@ -46,7 +46,7 @@ describe("runner queueing", () => {
     name,
     label: name,
     credentialFields: [],
-    syncPeriod: { choices: [1], default: 1 },
+    syncPeriod: {},
     create: (ctx) => ({
       async login() {
         const n = (inside.get(name) ?? 0) + 1;

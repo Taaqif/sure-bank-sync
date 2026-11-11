@@ -62,9 +62,8 @@ const DOWNLOAD = {
   dateRangeTab: '[data-testid="Date range"], [role="tab"]:has-text("Date range")',
   from: "#fromdate-textfield",
   to: "#todate-textfield",
-  /** validation text under the date boxes */
-  fromMessage: "#fromdate-textfield-message",
-  toMessage: "#todate-textfield-message",
+  /** where ANZ says what's wrong with the dates: under the boxes, or a banner on top */
+  problems: '#fromdate-textfield-message, #todate-textfield-message, #search-alert, [role="alert"]',
 };
 const CSV_FORMAT = "Microsoft Excel(CSV)";
 
@@ -76,12 +75,35 @@ const MAX_DAYS_BACK = 365 * 2;
 /** YYYY-MM-DD -> DD/MM/YYYY (ANZ's date boxes). */
 export const anzDmy = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
 
-/** The range ANZ can give: `since` moved up to 2 years before `until` when it's older. */
-export function anzRange(range: { since: string; until: string }): { since: string; until: string; clamped: boolean } {
-  const d = new Date(`${range.until}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() - MAX_DAYS_BACK);
-  const earliest = d.toISOString().slice(0, 10);
-  return range.since < earliest ? { since: earliest, until: range.until, clamped: true } : { ...range, clamped: false };
+const addDays = (iso: string, n: number) => {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+
+/** Today by ANZ's clock (Melbourne). */
+export const anzToday = (now = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: "Australia/Melbourne" }).format(now);
+
+/**
+ * The range ANZ will accept. To must be a past date ("Please enter a past
+ * date in Date Range"), so it's yesterday at the latest; From goes back at
+ * most 2 years.
+ */
+export function anzRange(range: { since: string; until: string }, today = anzToday()): { since: string; until: string; notes: string[] } {
+  const notes: string[] = [];
+  let { since, until } = range;
+  const latest = addDays(today, -1);
+  if (until > latest) {
+    until = latest;
+    notes.push(`ANZ only downloads up to yesterday; fetching to ${until}`);
+  }
+  const earliest = addDays(until, -MAX_DAYS_BACK);
+  if (since < earliest) {
+    since = earliest;
+    notes.push(`ANZ only has 2 years of history; fetching from ${since}`);
+  }
+  if (since > until) since = until;
+  return { since, until, notes };
 }
 
 /** Resolve with the next download from any tab (ANZ may post a form into a new tab). */
@@ -157,12 +179,7 @@ export const anz: ProviderDefinition = {
   ],
   // The Download page's Date range tab takes any dates up to 2 years back.
   startUrl: LOGIN_URL,
-  syncPeriod: {
-    choices: [7, 14, 30, 60, 90, 180, 365, 730],
-    default: 14,
-    customRange: true,
-    note: "ANZ downloads up to 2 years of history.",
-  },
+  syncPeriod: { maxDays: MAX_DAYS_BACK, note: "ANZ downloads up to 2 years of history." },
   create: (ctx: ProviderContext) => {
     // Full API responses hold account data: only capture them on debug runs.
     const captured = ctx.debug ? captureJson(ctx, /(^|\.)anz\.com$/) : { count: 0 };
@@ -241,7 +258,7 @@ export const anz: ProviderDefinition = {
       async fetchTransactions(wanted) {
         const accounts = await this.listAccounts!();
         const range = anzRange(wanted);
-        if (range.clamped) ctx.log(`anz: ANZ only has 2 years of history; fetching from ${range.since}`);
+        for (const n of range.notes) ctx.log(`anz: ${n}`);
 
         /** Type a date into one of ANZ's DD/MM/YYYY boxes (they start filled in). */
         async function typeDate(sel: string, iso: string) {
@@ -308,11 +325,13 @@ export const anz: ProviderDefinition = {
           const problem = await Promise.race([
             waiting.then(() => ""),
             page
-              .locator(`${DOWNLOAD.fromMessage}, ${DOWNLOAD.toMessage}`)
+              .locator(DOWNLOAD.problems)
               .filter({ hasText: /\S/ })
               .first()
-              .waitFor({ state: "visible", timeout: 8_000 })
-              .then(async () => (await page.locator(`${DOWNLOAD.fromMessage}, ${DOWNLOAD.toMessage}`).allInnerTexts()).join(" ").trim())
+              .waitFor({ state: "visible", timeout: 10_000 })
+              .then(async () =>
+                (await page.locator(DOWNLOAD.problems).filter({ hasText: /\S/ }).allInnerTexts()).join(" ").replace(/\s+/g, " ").trim(),
+              )
               .catch(() => ""),
           ]);
           if (problem) {
