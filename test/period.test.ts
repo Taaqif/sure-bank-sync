@@ -16,7 +16,7 @@ function demoConn(env: ReturnType<typeof setup>) {
 describe("run period", () => {
   const tz = "Australia/Melbourne";
   const demo = PROVIDERS.demo!.syncPeriod;
-  const anz = PROVIDERS.anz!.syncPeriod;
+  const noCustom = { choices: [7, 14], default: 7 };
   const stake = PROVIDERS.stake!.syncPeriod;
 
   it("parses the period picked on Run now", () => {
@@ -32,14 +32,14 @@ describe("run period", () => {
   it("rejects choices the bank doesn't offer and bad dates", () => {
     expect(() => runPeriod({ period: "13" }, demo, tz)).toThrow(/from the list/);
     expect(() => runPeriod({ period: "all" }, demo, tz)).toThrow(/all time/);
-    expect(() => runPeriod({ period: "custom", since: "2025-01-01" }, anz, tz)).toThrow(/custom dates/);
+    expect(() => runPeriod({ period: "custom", since: "2025-01-01" }, noCustom, tz)).toThrow(/custom dates/);
     expect(() => runPeriod({ period: "custom", since: "" }, demo, tz)).toThrow(/From date/);
     expect(() => runPeriod({ period: "custom", since: "2025-02-30" }, demo, tz)).toThrow(/From date/);
     expect(() => runPeriod({ period: "custom", since: "2025-03-01", until: "2025-01-01" }, demo, tz)).toThrow(/on or before/);
     expect(() => runPeriod({ period: "custom", since: "2025-01-01", until: "2999-01-01" }, demo, tz)).toThrow(/future/);
   });
 
-  it("offers custom dates only for banks that can search any range", async () => {
+  it("offers custom dates for banks that can search any range", async () => {
     const env = setup();
     const { app } = makeApp(env);
     const id = demoConn(env);
@@ -48,8 +48,7 @@ describe("run period", () => {
     expect(demoPage).toContain('name="period"');
     expect(demoPage).toContain("Custom dates…");
     const anzPage = await (await get(app, "/connections/alice-anz")).text();
-    expect(anzPage).toContain('name="period"');
-    expect(anzPage).not.toContain("Custom dates…");
+    expect(anzPage).toContain("Custom dates…");
   });
 
   it("fetches exactly the chosen dates for this run only", async () => {

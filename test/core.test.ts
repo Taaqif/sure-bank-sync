@@ -526,6 +526,17 @@ describe("macquarie robot check", async () => {
   });
 });
 
+describe("anz date range", async () => {
+  const { anzDmy, anzRange } = await import("../src/providers/anz.js");
+  it("types dates as DD/MM/YYYY", () => {
+    expect(anzDmy("2026-01-05")).toBe("05/01/2026");
+  });
+  it("keeps ranges within ANZ's 2 years", () => {
+    expect(anzRange({ since: "2026-01-01", until: "2026-11-11" })).toEqual({ since: "2026-01-01", until: "2026-11-11", clamped: false });
+    expect(anzRange({ since: "2020-01-01", until: "2026-11-11" })).toEqual({ since: "2024-11-11", until: "2026-11-11", clamped: true });
+  });
+});
+
 describe("macquarie trusted browser name", async () => {
   const { browserNickname } = await import("../src/providers/macquarie.js");
   it("defaults to the app name and keeps only characters Macquarie allows", () => {

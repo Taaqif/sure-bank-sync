@@ -8,8 +8,10 @@
  * Transactions tab -> Download. (Opening #/download-transaction directly and
  * pressing Search was silently ignored by the app.)
  *
- * Transactions: for each account, choose a duration covering the lookback,
- * keep "Microsoft Excel(CSV)", click Download and parse the file.
+ * Transactions: for each account, open Download, pick the "Date range" tab,
+ * type From/To (DD/MM/YYYY, up to 2 years back), keep "Microsoft
+ * Excel(CSV)", click Download and parse the file. If the Date range tab
+ * isn't there, the fixed durations (up to 120 days) are used instead.
  */
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -57,11 +59,30 @@ const DOWNLOAD = {
   softwareInput: '[data-test-id="drop-down-search-software-dropdown-field"]',
   softwareOptions: '[data-test-id^="drop-down-search-software-dropdown-result-"]',
   submit: '[data-test-id="footer-primary-button_button"]',
+  dateRangeTab: '[data-testid="Date range"], [role="tab"]:has-text("Date range")',
+  from: "#fromdate-textfield",
+  to: "#todate-textfield",
+  /** validation text under the date boxes */
+  fromMessage: "#fromdate-textfield-message",
+  toMessage: "#todate-textfield-message",
 };
 const CSV_FORMAT = "Microsoft Excel(CSV)";
 
-/** Duration choices offered by ANZ, in days. Longer needs the date-range tab (not implemented). */
+/** Duration choices offered by ANZ, in days (the fallback when the Date range tab is missing). */
 const DURATIONS = [7, 14, 30, 60, 90, 120];
+/** ANZ's Date range goes back this far ("You can download up to 2 years of transactions"). */
+const MAX_DAYS_BACK = 365 * 2;
+
+/** YYYY-MM-DD -> DD/MM/YYYY (ANZ's date boxes). */
+export const anzDmy = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+
+/** The range ANZ can give: `since` moved up to 2 years before `until` when it's older. */
+export function anzRange(range: { since: string; until: string }): { since: string; until: string; clamped: boolean } {
+  const d = new Date(`${range.until}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - MAX_DAYS_BACK);
+  const earliest = d.toISOString().slice(0, 10);
+  return range.since < earliest ? { since: earliest, until: range.until, clamped: true } : { ...range, clamped: false };
+}
 
 /** Resolve with the next download from any tab (ANZ may post a form into a new tab). */
 function nextDownload(browser: BrowserContext, timeout: number): Promise<Download> {
@@ -134,9 +155,14 @@ export const anz: ProviderDefinition = {
     { key: "customer_id", label: "Customer Registration Number" },
     { key: "password", label: "Password", secret: true },
   ],
-  // ANZ's download offers these durations; longer needs the date-range tab (not implemented).
+  // The Download page's Date range tab takes any dates up to 2 years back.
   startUrl: LOGIN_URL,
-  syncPeriod: { choices: DURATIONS, default: 14, note: "ANZ downloads in these fixed durations (max 120 days)." },
+  syncPeriod: {
+    choices: [7, 14, 30, 60, 90, 180, 365, 730],
+    default: 14,
+    customRange: true,
+    note: "ANZ downloads up to 2 years of history.",
+  },
   create: (ctx: ProviderContext) => {
     // Full API responses hold account data: only capture them on debug runs.
     const captured = ctx.debug ? captureJson(ctx, /(^|\.)anz\.com$/) : { count: 0 };
@@ -212,12 +238,45 @@ export const anz: ProviderDefinition = {
         return accounts;
       },
 
-      async fetchTransactions(range) {
+      async fetchTransactions(wanted) {
         const accounts = await this.listAccounts!();
-        const want = daysBetween(range.since, range.until);
-        const days = DURATIONS.find((d) => d >= want) ?? DURATIONS.at(-1)!;
-        if (want > days) ctx.log(`anz: lookback ${want} days is more than ANZ's longest duration; using last ${days} days`);
-        const label = `Last ${days} days`;
+        const range = anzRange(wanted);
+        if (range.clamped) ctx.log(`anz: ANZ only has 2 years of history; fetching from ${range.since}`);
+
+        /** Type a date into one of ANZ's DD/MM/YYYY boxes (they start filled in). */
+        async function typeDate(sel: string, iso: string) {
+          const box = page.locator(sel).first();
+          await box.click();
+          await box.press("Control+a");
+          await box.press("Backspace");
+          await box.pressSequentially(anzDmy(iso), { delay: 80 });
+          await box.press("Tab");
+          await pause(300, 600);
+        }
+
+        /** Pick the Date range tab and type the dates. False when the tab isn't there. */
+        async function useDateRange(): Promise<boolean> {
+          const tab = page.locator(DOWNLOAD.dateRangeTab).first();
+          if (!(await tab.isVisible().catch(() => false))) return false;
+          await tab.click();
+          await page.locator(DOWNLOAD.from).waitFor({ timeout: 10_000 });
+          await pause(300, 700);
+          await typeDate(DOWNLOAD.from, range.since);
+          await typeDate(DOWNLOAD.to, range.until);
+          return true;
+        }
+
+        /** Fallback: the shortest fixed duration that covers the range from today. */
+        async function useDuration(): Promise<string> {
+          const want = daysBetween(range.since, range.until);
+          const days = DURATIONS.find((d) => d >= want) ?? DURATIONS.at(-1)!;
+          if (want > days) ctx.log(`anz: ${want} days is more than ANZ's longest duration; using last ${days} days`);
+          const label = `Last ${days} days`;
+          await page.locator(DOWNLOAD.durationInput).click();
+          await page.locator(DOWNLOAD.durationOptions).filter({ hasText: new RegExp(`^\\s*${label}\\s*$`) }).first().click();
+          await pause(300, 700);
+          return label;
+        }
 
         const all: BankTransaction[] = [];
         for (const [i, acct] of accounts.entries()) {
@@ -230,18 +289,36 @@ export const anz: ProviderDefinition = {
           await page.locator(DOWNLOAD.softwareInput).waitFor({ timeout: 30_000 });
           await settle(page);
 
-          await page.locator(DOWNLOAD.durationInput).click();
-          await page.locator(DOWNLOAD.durationOptions).filter({ hasText: new RegExp(`^\\s*${label}\\s*$`) }).first().click();
-          await pause(300, 700);
+          let period = `${range.since} to ${range.until}`;
+          if (!(await useDateRange())) {
+            ctx.log("anz: no Date range tab on the download page; using a fixed duration");
+            period = await useDuration();
+          }
           if ((await page.locator(DOWNLOAD.softwareInput).inputValue()) !== CSV_FORMAT) {
             await page.locator(DOWNLOAD.softwareInput).click();
             await page.locator(DOWNLOAD.softwareOptions).filter({ hasText: CSV_FORMAT }).first().click();
           }
           await pause(300, 700);
 
-          ctx.log(`anz: ${acct.name}: downloading ${label} as CSV`);
+          ctx.log(`anz: ${acct.name}: downloading ${period} as CSV`);
           const waiting = nextDownload(ctx.browser, 60_000);
+          waiting.catch(() => {}); // handled below; a date error means no download
           await page.locator(DOWNLOAD.submit).click();
+          // ANZ shows date problems under the boxes instead of downloading.
+          const problem = await Promise.race([
+            waiting.then(() => ""),
+            page
+              .locator(`${DOWNLOAD.fromMessage}, ${DOWNLOAD.toMessage}`)
+              .filter({ hasText: /\S/ })
+              .first()
+              .waitFor({ state: "visible", timeout: 8_000 })
+              .then(async () => (await page.locator(`${DOWNLOAD.fromMessage}, ${DOWNLOAD.toMessage}`).allInnerTexts()).join(" ").trim())
+              .catch(() => ""),
+          ]);
+          if (problem) {
+            await snapshot(ctx, `anz-dates-${i}`);
+            throw new ProviderError(`ANZ refused the dates ${period}: ${problem}`);
+          }
           const dl = await waiting;
           // Playwright keeps downloads in a temp dir removed with the browser;
           // only debug runs keep a copy.

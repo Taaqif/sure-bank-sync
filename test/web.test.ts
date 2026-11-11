@@ -263,7 +263,7 @@ describe("web", () => {
     const { app } = makeApp(env);
     const anz = await (await get(app, "/connections/new?provider=anz")).text();
     expect(anz).toContain("Bank default (last 14 days)");
-    expect(anz).toContain("Last 120 days");
+    expect(anz).toContain("Last 730 days");
     const amex = await (await get(app, "/connections/new?provider=amex")).text();
     expect(amex).toContain("Last 180 days");
     expect(amex).toContain('name="lookbackDays"');
