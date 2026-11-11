@@ -295,6 +295,7 @@ export const macquarie: ProviderDefinition = {
     return {
       async login() {
         page = ctx.browser.pages()[0] ?? (await ctx.browser.newPage());
+        await dismissWhatsNew(page, ctx.log);
         ctx.log("macquarie: opening login page");
         await page.goto(LOGIN_URL, { waitUntil: "domcontentloaded", timeout: 45_000 });
         await settle(page);
@@ -503,3 +504,30 @@ export const macquarie: ProviderDefinition = {
     };
   },
 };
+
+/**
+ * Macquarie sometimes covers the page with a full-screen "What's new"
+ * announcement (e.g. Confirmation of Payee), possibly over several slides.
+ * Whenever it's in the way of a click or typing, page through it and close
+ * it, the way a person would.
+ */
+const watched = new WeakSet<Page>();
+export async function dismissWhatsNew(page: Page, log: (m: string) => void): Promise<void> {
+  if (watched.has(page)) return;
+  watched.add(page);
+  const popup = page.locator("mq-whats-new .mq-whats-new__actions");
+  await page.addLocatorHandler(popup, async () => {
+    const title = (await page.locator("mq-whats-new .mq-whats-new__information-title").first().innerText().catch(() => "")).trim();
+    log(`macquarie: closing a "What's new" popup${title ? ` (${title})` : ""}`);
+    for (let i = 0; i < 8 && (await popup.isVisible().catch(() => false)); i++) {
+      const close = page
+        .locator("mq-whats-new .mq-whats-new__actions--finish, mq-whats-new .mq-whats-new__dismiss-button-container button")
+        .or(page.locator("mq-whats-new").getByRole("button", { name: /got it|close|skip|done|next|not now|maybe later/i }))
+        .locator("visible=true")
+        .first();
+      if (!(await close.count())) break;
+      await close.click();
+      await page.waitForTimeout(400 + Math.random() * 400);
+    }
+  });
+}
