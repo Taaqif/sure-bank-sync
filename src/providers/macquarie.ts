@@ -7,7 +7,8 @@
  * to a person through the browser view instead of failing.
  *
  * Also handled: Macquarie's "I'm not a robot" checkbox (handed to a person)
- * and the "trust this browser" page (answered yes).
+ * and the "trust this browser" page (answered yes, with a nickname for the
+ * browser: options.browserName, default "Sure Bank Sync").
  *
  * Accounts: the rows on /io/#/accounts (product name, "BSB | number").
  * Transactions: per account, click it -> "Download transactions" (top right of
@@ -24,6 +25,19 @@ import { AuthError, ProviderError, captureJson, pause, settle, snapshot, type Pr
 const LOGIN_URL = "https://online.macquarie.com.au/personal/";
 const ACCOUNTS_URL = "https://online.macquarie.com.au/io/#/accounts";
 const HOST = /(^|\.)macquarie\.com\.au$/;
+
+/** Nickname given to the trusted browser when the connection's options don't set browserName. */
+export const DEFAULT_BROWSER_NAME = "Sure Bank Sync";
+
+/**
+ * The trusted browser's nickname. Macquarie allows only letters, numbers,
+ * quotes, colons and spaces, so anything else becomes a space.
+ */
+export function browserNickname(options: Record<string, unknown>): string {
+  const raw = typeof options.browserName === "string" ? options.browserName : "";
+  const name = raw.replace(/[^A-Za-z0-9'"‘’“”: ]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 40).trim();
+  return name || DEFAULT_BROWSER_NAME;
+}
 
 const SEL = {
   username: [
@@ -113,7 +127,8 @@ export const macquarie: ProviderDefinition = {
   ],
   // The transactions date filter takes any range, so any period works.
   startUrl: LOGIN_URL,
-  syncPeriod: { choices: [7, 14, 30, 60, 90, 180, 365], default: 14 },
+  optionsHint: `Macquarie: {"browserName": "Sure Bank Sync"} sets the nickname given when trusting this browser (letters, numbers, quotes, colons and spaces).`,
+  syncPeriod: { choices: [7, 14, 30, 60, 90, 180, 365], default: 14, customRange: true },
   create: (ctx: ProviderContext) => {
     // Full API responses hold account data: only capture them on debug runs.
     if (ctx.debug) captureJson(ctx, HOST);
@@ -331,6 +346,7 @@ export const macquarie: ProviderDefinition = {
         if (!(await clickSubmit(SUBMIT))) await pass.press("Enter");
         ctx.log("macquarie: credentials submitted");
 
+        let trustTried = false;
         for (let step = 1; step <= 6; step++) {
           const s = await state();
           if (s === "logged_in") {
@@ -373,14 +389,24 @@ export const macquarie: ProviderDefinition = {
           }
           if (s === "trust") {
             // "Trust this browser?": yes, so Macquarie asks for MFA less often.
+            // It needs a nickname for the browser before the button works.
             const yes = page.getByRole("button", { name: /trust|yes|remember|continue/i }).locator("visible=true").first();
-            if (await yes.count()) {
+            if (!trustTried && (await yes.count())) {
+              trustTried = true;
+              const nick = page.locator('input[formcontrolname="nickname"], #nickname').locator("visible=true").first();
+              if (await nick.count()) {
+                const name = browserNickname(ctx.options);
+                ctx.log(`macquarie: naming this browser "${name}"`);
+                await typeInto(nick, name);
+                await pause(300, 600);
+              }
               ctx.log(`macquarie: trusting this browser ("${(await yes.innerText()).trim()}")`);
               await yes.click();
               await settle(page);
               continue;
             }
-            ctx.log("macquarie: trust-browser page without a recognised button, asking you");
+            // Still here after trying (e.g. the name was refused): a person finishes it.
+            ctx.log("macquarie: couldn't finish the trust-browser page by itself, asking you");
             await ctx.requestBrowserHelp(page, "Macquarie asks whether to trust this browser. Choose to trust it.", async () =>
               !/#\/trust-browser/.test(page.url()),
             );

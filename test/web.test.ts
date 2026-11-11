@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { ALL_TIME_DAYS, syncDays, syncLabel } from "../src/providers/index.js";
 import { sql } from "drizzle-orm";
 import { emptyStats } from "../src/runs.js";
-import { fakeSure, form, makeApp, setup } from "./helpers.js";
+import { fakeSure, form, makeApp, setup, flash } from "./helpers.js";
 
 const ACCT_ID = "012-345 6789999";
 const get = (app: { request: (p: string, i?: RequestInit) => Response | Promise<Response> }, path: string, headers = {}) =>
@@ -60,11 +60,12 @@ describe("web", () => {
       "/connections",
       form({ userId: String(bob.id), provider: "amex", enabled: "on", cred_username: "bob@x", cred_password: "pw", options: "{}" }),
     );
-    expect(r.headers.get("location")).toMatch(/^\/connections\/bob-amex\?/);
+    expect(r.headers.get("location")).toBe("/connections/bob-amex");
+    expect(flash(r)).toContain("Connection added");
     expect(env.store.credentials("bob-amex")).toEqual({ username: "bob@x", password: "pw" });
 
     r = await app.request("/connections", form({ userId: String(bob.id), provider: "amex", cred_username: "x" }));
-    expect(decodeURIComponent(r.headers.get("location")!)).toContain("required: Password");
+    expect(flash(r)).toContain("required: Password");
 
     r = await app.request(
       "/settings",
@@ -353,8 +354,38 @@ describe("web", () => {
     expect(html).toContain("remembered devices of 1 connection");
     expect(html).toContain("2 KB");
     const r = await app.request("/settings/clear-browsers", form({}));
-    expect(r.headers.get("location")).toContain("Cleared%201%20saved%20browser");
+    expect(flash(r)).toBe("Cleared 1 saved browser");
     expect(existsSync(profile)).toBe(false);
+  });
+
+  it("shows a flash message once, from a cookie rather than the URL", async () => {
+    const env = setup();
+    const { app } = makeApp(env);
+    const r = await app.request("/connections/alice-anz/clear-browser", form({}));
+    expect(r.headers.get("location")).toBe("/connections/alice-anz");
+    const cookie = (r.headers.get("set-cookie") ?? "").split(";")[0]!;
+    expect(cookie).toMatch(/^sbs_flash=/);
+    expect(r.headers.get("set-cookie")).toMatch(/HttpOnly/i);
+    const shown = await app.request("/connections/alice-anz", { headers: { Host: "localhost", Cookie: cookie } });
+    expect(await shown.text()).toContain("Cleared this connection");
+    expect(shown.headers.get("set-cookie")).toMatch(/sbs_flash=;.*Max-Age=0/i);
+  });
+
+  it("clears one connection's saved browser", async () => {
+    const env = setup();
+    const { app } = makeApp(env);
+    const mine = join(env.dir, "browser", "alice-anz");
+    const other = join(env.dir, "browser", "other-conn");
+    for (const d of [mine, other]) {
+      mkdirSync(d, { recursive: true });
+      writeFileSync(join(d, "Cookies"), "x");
+    }
+    expect(await (await get(app, "/connections/alice-anz")).text()).toContain("/connections/alice-anz/clear-browser");
+    const r = await app.request("/connections/alice-anz/clear-browser", form({}));
+    expect(flash(r)).toContain("Cleared");
+    expect(existsSync(mine)).toBe(false);
+    expect(existsSync(other)).toBe(true);
+    expect((await app.request("/connections/nope/clear-browser", form({}))).status).toBe(404);
   });
 
   it("serves the connection page's live parts", async () => {
@@ -384,24 +415,25 @@ describe("web", () => {
     expect(await (await get(app, "/settings")).text()).toContain("2 runs");
 
     let r = await app.request("/settings/storage/runs", form({ olderThanDays: "30" }));
-    expect(r.headers.get("location")).toMatch(/^\/settings\?msg=Deleted%201%20run.*#storage$/);
+    expect(r.headers.get("location")).toBe("/settings#storage");
+    expect(flash(r)).toMatch(/^Deleted 1 run/);
     expect(env.runs.get(old)).toBeUndefined();
     expect(env.runs.get(recent)).toBeDefined();
 
     r = await app.request("/settings/storage/debug", form({}));
-    expect(r.headers.get("location")).toContain("Deleted%20debug%20files%20of%201%20run");
+    expect(flash(r)).toContain("Deleted debug files of 1 run");
     expect(existsSync(dbg)).toBe(false);
 
     r = await app.request("/settings/storage/runs", form({ olderThanDays: "5" }));
-    expect(r.headers.get("location")).toContain("Error");
+    expect(flash(r)).toMatch(/^Error/);
 
     // Delete everything needs DELETE typed; settings and synced records stay.
     mkdirSync(join(env.dir, "browser", "alice-anz"), { recursive: true });
     r = await app.request("/settings/storage/everything", form({ confirm: "yes" }));
-    expect(r.headers.get("location")).toContain("Error");
+    expect(flash(r)).toMatch(/^Error/);
     expect(env.runs.get(recent)).toBeDefined();
     r = await app.request("/settings/storage/everything", form({ confirm: "DELETE" }));
-    expect(r.headers.get("location")).toContain("Deleted%201%20run");
+    expect(flash(r)).toContain("Deleted 1 run");
     expect(env.runs.get(recent)).toBeUndefined();
     expect(existsSync(join(env.dir, "browser"))).toBe(false);
     expect(env.store.connections()).toHaveLength(1);

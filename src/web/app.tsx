@@ -9,7 +9,7 @@ import type { Child } from "hono/jsx";
 import { clearLogFile, logFileBytes, logger, tailLog } from "../log.js";
 import { RETRY, type MfaBroker } from "../mfa.js";
 import { ALL_TIME, PROVIDERS, syncLabel, type SyncPeriod } from "../providers/index.js";
-import { DEBUG_TOOLS, type Runner } from "../runner.js";
+import { DEBUG_TOOLS, dateRange, type Runner, type RunPeriod } from "../runner.js";
 import { RECIPE_RE, type Recording } from "../recorder.js";
 import { cronPreview, describeCron } from "../schedule.js";
 import type { RunStore } from "../runs.js";
@@ -77,20 +77,44 @@ export interface Services {
 
 const log = logger("web");
 
+/** One-time message for the page after a redirect ("Saved", "Error: ..."). */
+const FLASH_COOKIE = "sbs_flash";
+const FLASH_SECONDS = 60;
+
 type Body = Record<string, string | File | (string | File)[]>;
 const str = (b: Body, k: string): string => {
   const v = b[k];
   return typeof v === "string" ? v : "";
 };
 
-/** Redirect with an optional flash message (kept before any #fragment so the server sees it). */
-function redirect(c: Context, url: string, msg?: string) {
-  if (msg) {
-    const at = url.indexOf("#");
-    const [path, hash] = at >= 0 ? [url.slice(0, at), url.slice(at)] : [url, ""];
-    url = path + (path.includes("?") ? "&" : "?") + "msg=" + encodeURIComponent(msg) + hash;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const isDate = (d: string) => ISO_DATE.test(d) && new Date(`${d}T00:00:00Z`).toISOString().slice(0, 10) === d;
+
+/**
+ * The period picked on "Run now" (this run only). Empty: the connection's own
+ * setting. Throws ValidationError for a choice the bank doesn't offer or bad dates.
+ */
+export function runPeriod(b: Body, period: SyncPeriod | undefined, tz: string): RunPeriod | undefined {
+  const v = str(b, "period");
+  if (!v) return undefined;
+  if (!period || "fixed" in period) throw new ValidationError("this bank decides its own period");
+  if (v === "all") {
+    if (!period.allTime) throw new ValidationError("this bank can't fetch all time");
+    return { days: ALL_TIME };
   }
-  return c.redirect(url, 303);
+  if (v === "custom") {
+    if (!period.customRange) throw new ValidationError("this bank can't fetch custom dates");
+    const since = str(b, "since");
+    const until = str(b, "until") || dateRange(tz, 0).until;
+    if (!isDate(since)) throw new ValidationError("pick a From date");
+    if (!isDate(until)) throw new ValidationError("pick a valid To date");
+    if (since > until) throw new ValidationError("From must be on or before To");
+    if (until > dateRange(tz, 0).until) throw new ValidationError("To can't be in the future");
+    return { since, until };
+  }
+  const days = Number(v);
+  if (!period.choices.includes(days)) throw new ValidationError("pick a period from the list");
+  return { days };
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -160,6 +184,23 @@ export function createApp(svc: Services) {
   const isHttps = (c: Context) => origin(c).startsWith("https:");
   const cookieOpts = (c: Context, maxAge: number, path = "/") =>
     ({ httpOnly: true, sameSite: "Lax", secure: isHttps(c), path, maxAge }) as const;
+
+  /**
+   * Redirect with an optional flash message. The message rides in a short-lived
+   * cookie (not the URL), shown once by the next page and then cleared.
+   */
+  function redirect(c: Context, url: string, msg?: string) {
+    if (msg) setCookie(c, FLASH_COOKIE, msg, cookieOpts(c, FLASH_SECONDS));
+    return c.redirect(url, 303);
+  }
+
+  /** The flash message for this page, if any (shown once). */
+  function msgOf(c: Context): string | undefined {
+    const msg = getCookie(c, FLASH_COOKIE);
+    if (msg === undefined) return undefined;
+    deleteCookie(c, FLASH_COOKIE, { path: "/", secure: isHttps(c) });
+    return msg || undefined;
+  }
 
   /** Signed-in user ("" when there's no login), or null. */
   function currentUser(c: Context): string | null {
@@ -272,7 +313,6 @@ export function createApp(svc: Services) {
     return c.json({ error: "login_required" }, 401);
   });
 
-  const msgOf = (c: Context) => c.req.query("msg");
   const page = (c: Context, node: Child, status?: 200 | 400) =>
     c.html(
       <UiContext.Provider
@@ -705,15 +745,35 @@ export function createApp(svc: Services) {
     return redirect(c, "/", `Deleted ${id}`);
   });
 
-  app.post("/connections/:id/run", async (c) => {
+  // Forget this connection's saved browser: cookies, cache, sessions and remembered device.
+  app.post("/connections/:id/clear-browser", async (c) => {
     const id = c.req.param("id");
     if (!store.connection(id)) return c.notFound();
+    if (svc.runner.isRunning(id)) return redirect(c, `/connections/${id}`, "Error: wait for the current run to finish");
+    await removeProfile(id);
+    log.info(`cleared browser profile of ${id}`);
+    return redirect(c, `/connections/${id}`, "Cleared this connection's saved browser. The next login looks like a new device.");
+  });
+
+  app.post("/connections/:id/run", async (c) => {
+    const id = c.req.param("id");
+    const conn = store.connection(id);
+    if (!conn) return c.notFound();
     const b = await c.req.parseBody();
+    let period: RunPeriod | undefined;
+    try {
+      // Discover lists accounts only, so its period doesn't matter.
+      if (b.discover !== "1") period = runPeriod(b, PROVIDERS[conn.provider]?.syncPeriod, store.settings().timezone);
+    } catch (e) {
+      if (e instanceof ValidationError) return redirect(c, `/connections/${id}`, `Error: ${e.message}`);
+      throw e;
+    }
     svc.runner.startBackground(id, {
+      period,
       kind: b.kind === "statements" ? "statements" : undefined,
-      dryRun: b.dryRun === "1" || undefined,
+      dryRun: b.dryRun === "1" || b.mode === "dryRun" || undefined,
       discover: b.discover === "1" || undefined,
-      debug: b.debug === "1" || undefined,
+      debug: b.debug === "1" || b.mode === "debug" || undefined,
     });
     const back = c.req.header("referer");
     let path = "/";

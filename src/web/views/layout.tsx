@@ -72,7 +72,7 @@ form.stack, div.stack { display: grid; gap: 14px; padding: 16px; max-width: 560p
 .stack label { display: grid; gap: 4px; font-weight: 500; }
 .stack label small, .hint { color: var(--muted); font-weight: 400; font-size: 12px; }
 .stack label.check { display: flex; gap: 8px; align-items: center; }
-input[type=text], input[type=password], input[type=number], input[type=url], select, textarea {
+input[type=text], input[type=password], input[type=number], input[type=url], input[type=date], select, textarea {
   font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); width: 100%; }
 td select { width: auto; min-width: 220px; }
 textarea { font-family: ui-monospace, monospace; font-size: 12px; min-height: 60px; }
@@ -88,6 +88,16 @@ fieldset:disabled { opacity: .6; }
 .runbar { display: flex; gap: 12px 16px; align-items: center; flex-wrap: wrap; padding: 12px; overflow: visible; }
 .runbar .sep { width: 1px; align-self: stretch; background: var(--line); }
 .runbar .hint { flex-basis: 100%; }
+.modal { border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--fg); padding: 0; width: min(520px, calc(100vw - 32px)); }
+.modal::backdrop { background: rgba(0, 0, 0, .45); }
+.modal h3 { margin: 0; }
+.modal .seg { margin-top: 6px; flex-wrap: wrap; }
+.modal .seg label { display: block; }
+.modal .period { display: grid; gap: 10px; }
+.modal form > div > strong { display: block; }
+.modal .custom-range { display: none; align-items: flex-start; }
+.modal .custom-range label { flex: 1; }
+.modal .period:has(option[value="custom"]:checked) .custom-range { display: flex; }
 .seg { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
 .seg label { position: relative; cursor: pointer; }
 .seg input { position: absolute; opacity: 0; pointer-events: none; }

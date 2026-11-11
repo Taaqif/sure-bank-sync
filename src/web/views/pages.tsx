@@ -1,7 +1,7 @@
 import type { BankAccountRow, Run } from "../../db/schema.js";
 import type { RunsPage } from "../../runs.js";
 import type { MfaRequest } from "../../mfa.js";
-import type { ProviderDefinition } from "../../providers/index.js";
+import { syncLabel, type ProviderDefinition } from "../../providers/index.js";
 import type { Connection, Settings, User } from "../../store.js";
 import type { SureAccount } from "../../sureClient.js";
 import { useContext } from "hono/jsx";
@@ -675,13 +675,13 @@ function StatementFields(p: { conn?: Connection; settings: Settings; provider?: 
   );
 }
 
-function AdvancedFields(p: { conn?: Connection }) {
+function AdvancedFields(p: { conn?: Connection; provider?: ProviderDefinition }) {
   return (
     <>
       <label>
         Options (JSON)
         <textarea name="options">{JSON.stringify(p.conn?.options ?? {})}</textarea>
-        <small>Provider specific. Demo bank: {'{"mfa": true}'} tests the code prompt.</small>
+        <small>{p.provider?.optionsHint ?? <>Provider specific. Demo bank: {'{"mfa": true}'} tests the code prompt.</>}</small>
       </label>
     </>
   );
@@ -738,7 +738,7 @@ export const ConnectionNewPage = (p: {
           <details>
             <summary>Advanced</summary>
             <div class="stack" style="padding:12px 0 0">
-              <AdvancedFields />
+              <AdvancedFields provider={p.provider} />
             </div>
           </details>
           <div>
@@ -757,61 +757,143 @@ export const accountsKey = (accounts: { bankAccountId: string }[]) =>
     .sort()
     .join("|");
 
-/** Connection title and run bar (refreshed live). */
-export const ConnActions = (p: { conn: Connection; provider?: ProviderDefinition; running: boolean; accounts: string }) => {
+/** Connection title and run bar (refreshed live). "Run now" opens RunDialog. */
+export const ConnActions = (p: { conn: Connection; provider?: ProviderDefinition; running: boolean; accounts: string }) => (
+  <div id="conn-actions" data-running={p.running ? "1" : undefined} data-accounts={p.accounts}>
+    <div class="row between">
+      <h2>
+        {p.conn.userName} · {p.conn.id} <span class="muted">({p.provider?.label ?? p.conn.provider})</span>
+        {p.running && <LiveBadge title="A run is in progress; this page updates live" />}
+      </h2>
+      {p.running && <CancelButton connectionId={p.conn.id} />}
+    </div>
+    <div class="card runbar">
+      <button type="button" data-open-run disabled={p.running}>
+        {p.running ? "Running…" : "Run now…"}
+      </button>
+      <form method="post" action={`/connections/${p.conn.id}/run`}>
+        <button type="submit" class="secondary" name="discover" value="1" disabled={p.running} title="Log in and list accounts to map; nothing fetched or written">
+          Discover accounts
+        </button>
+      </form>
+      <small class="hint">
+        <strong>Run now</strong> lets you pick what to import, a dry run and the period for this run.{" "}
+        <strong>Discover accounts</strong> logs in and lists accounts to map; nothing is fetched or written.
+      </small>
+    </div>
+  </div>
+);
+
+/**
+ * "Run now" options: what to import, how (sync, dry run, debug run) and the
+ * period for this run only. Lives outside the live-refreshed run bar so a
+ * refresh never closes it.
+ */
+const RunDialog = (p: { conn: Connection; provider?: ProviderDefinition; settings: Settings }) => {
   const ui = useContext(UiContext);
   const statements = p.provider?.statements;
   const label = p.provider?.label ?? p.conn.provider;
   return (
-    <div id="conn-actions" data-running={p.running ? "1" : undefined} data-accounts={p.accounts}>
-      <div class="row between">
-        <h2>
-          {p.conn.userName} · {p.conn.id} <span class="muted">({label})</span>
-          {p.running && <LiveBadge title="A run is in progress; this page updates live" />}
-        </h2>
-        {p.running && <CancelButton connectionId={p.conn.id} />}
-      </div>
-      <form method="post" action={`/connections/${p.conn.id}/run`} class="card runbar">
-        <div class="seg" role="radiogroup" aria-label="What to import">
-          <label>
-            <input type="radio" name="kind" value="transactions" checked />
-            <span>Transactions</span>
-          </label>
-          <label title={statements ? undefined : `${label} can't import statements yet`}>
-            <input type="radio" name="kind" value="statements" disabled={!statements} />
-            <span>Statements</span>
-          </label>
+    <dialog id="run-dialog" class="modal">
+      <form method="post" action={`/connections/${p.conn.id}/run`} class="stack">
+        <h3>Run {p.conn.id}</h3>
+        <div>
+          <strong>What</strong>
+          <div class="seg" role="radiogroup" aria-label="What to import">
+            <label>
+              <input type="radio" name="kind" value="transactions" checked />
+              <span>Transactions</span>
+            </label>
+            <label title={statements ? undefined : `${label} can't import statements yet`}>
+              <input type="radio" name="kind" value="statements" disabled={!statements} />
+              <span>Statements</span>
+            </label>
+          </div>
         </div>
+        <div>
+          <strong>How</strong>
+          <div class="seg" role="radiogroup" aria-label="How to run">
+            <label>
+              <input type="radio" name="mode" value="" checked />
+              <span>
+                Sync<small>{p.settings.dryRun ? "dry run is on in Settings" : "send to Sure"}</small>
+              </span>
+            </label>
+            <label>
+              <input type="radio" name="mode" value="dryRun" />
+              <span>
+                Dry run<small>log only, write nothing</small>
+              </span>
+            </label>
+            {ui.debugTools && (
+              <label>
+                <input type="radio" name="mode" value="debug" />
+                <span>
+                  Debug run<small>visible browser, keeps data</small>
+                </span>
+              </label>
+            )}
+          </div>
+        </div>
+        <RunPeriodField conn={p.conn} provider={p.provider} />
         <div class="row">
-          {ui.debugTools && (
-            <button type="submit" class="secondary" name="debug" value="1" disabled={p.running} title="Dry run in a visible, slowed-down browser; keeps network data and downloaded files">
-              Debug run
-            </button>
-          )}
-          <button type="submit" class="secondary" name="dryRun" value="1" disabled={p.running} title="Fetch and log what would be sent; write nothing">
-            Dry run
-          </button>
-          <button type="submit" disabled={p.running}>
-            {p.running ? "Running…" : "Run now"}
+          <button type="submit">Start</button>
+          <button type="button" class="secondary" data-close-run>
+            Cancel
           </button>
         </div>
-        <span class="sep" aria-hidden="true" />
-        <button type="submit" class="secondary" name="discover" value="1" disabled={p.running} title="Log in and list accounts to map; nothing fetched or written">
-          Discover accounts
-        </button>
-        <small class="hint">
-          <strong>Dry run</strong> fetches and logs what would be sent, writing nothing.
-          {ui.debugTools && (
-            <>
-              {" "}
-              <strong>Debug run</strong> is a dry run in a visible browser that keeps network data and downloads.
-            </>
-          )}
-        </small>
       </form>
+    </dialog>
+  );
+};
+
+/**
+ * Period for this run only: the saved setting, one of the bank's choices,
+ * all time, or exact dates (banks that can search any range).
+ */
+const RunPeriodField = (p: { conn: Connection; provider?: ProviderDefinition }) => {
+  const period = p.provider?.syncPeriod;
+  if (!period || "fixed" in period) return null;
+  const days = (n: number) => (n === 1 ? "Last 1 day" : `Last ${n} days`);
+  return (
+    <div class="period">
+      <label>
+        Period
+        <select name="period">
+          <option value="">Saved setting ({syncLabel(p.conn)})</option>
+          {period.choices.map((n) => (
+            <option value={String(n)}>{days(n)}</option>
+          ))}
+          {period.allTime && <option value="all">All time</option>}
+          {period.customRange && <option value="custom">Custom dates…</option>}
+        </select>
+        <small>For this run only; the connection's saved period stays the same. Statements use their own lookback when left on the saved setting.</small>
+      </label>
+      {period.customRange && (
+        <div class="custom-range row">
+          <label>
+            From <input type="date" name="since" />
+          </label>
+          <label>
+            To <input type="date" name="until" />
+            <small>empty: today</small>
+          </label>
+        </div>
+      )}
     </div>
   );
 };
+
+/** Open and close the Run now dialog (the button is re-rendered by live refreshes). */
+const RUN_DIALOG_JS = `
+(() => {
+  const dialog = document.getElementById("run-dialog");
+  if (!dialog) return;
+  document.addEventListener("click", (e) => {
+    if (e.target.closest("[data-open-run]")) dialog.showModal();
+    else if (e.target.closest("[data-close-run]") || e.target === dialog) dialog.close();
+  });
+})();`;
 
 /** The connection's run table (refreshed live). */
 export const ConnRuns = (p: { conn: Connection; runs: RunsPage }) => (
@@ -843,7 +925,6 @@ const CONN_LIVE_JS = `
           const old = document.getElementById(part);
           if (fresh && old && fresh.innerHTML !== old.innerHTML) {
             old.replaceWith(fresh);
-            if (part === "conn-actions") restoreKind();
           }
         }
         const found = doc.getElementById("conn-actions")?.dataset.accounts;
@@ -878,7 +959,7 @@ const CONN_LIVE_JS = `
   function restoreKind() {
     let kind;
     try { kind = sessionStorage.getItem(key); } catch {}
-    const input = kind && document.querySelector('#conn-actions input[name="kind"][value="' + kind + '"]');
+    const input = kind && document.querySelector('#run-dialog input[name="kind"][value="' + kind + '"]');
     if (input && !input.disabled) input.checked = true;
   }
   document.addEventListener("change", (e) => {
@@ -904,9 +985,10 @@ export const ConnectionPage = (p: {
   const known = new Set(p.sureAccounts.map((a) => a.id));
   const ui = useContext(UiContext);
   return (
-    <Layout title={p.conn.id} nav="dashboard" msg={p.msg} script={SCHEDULE_JS + CONN_LIVE_JS}>
+    <Layout title={p.conn.id} nav="dashboard" msg={p.msg} script={SCHEDULE_JS + CONN_LIVE_JS + RUN_DIALOG_JS}>
       <div id="conn" data-id={p.conn.id} />
       <ConnActions conn={p.conn} provider={p.provider} running={p.running} accounts={accountsKey(p.accounts)} />
+      <RunDialog conn={p.conn} provider={p.provider} settings={p.settings} />
 
       <div id="conn-accounts" data-accounts={accountsKey(p.accounts)}>
       <h2 id="accounts">Accounts</h2>
@@ -977,7 +1059,7 @@ export const ConnectionPage = (p: {
           <details>
             <summary>Advanced</summary>
             <div class="stack" style="padding:12px 0 0">
-              <AdvancedFields conn={p.conn} />
+              <AdvancedFields conn={p.conn} provider={p.provider} />
             </div>
           </details>
           <div>
@@ -986,6 +1068,16 @@ export const ConnectionPage = (p: {
         </form>
       </div>
 
+      <form
+        method="post"
+        action={`/connections/${p.conn.id}/clear-browser`}
+        class="actions"
+        onsubmit="return confirm('Clear this connection\'s saved browser (cookies, cache, sessions)? It is logged out and the bank will treat the next login as a new device (expect an identity check).')"
+      >
+        <button type="submit" class="danger" disabled={p.running} title={p.running ? "Wait for the current run to finish" : undefined}>
+          Clear browser data
+        </button>
+      </form>
       <form
         method="post"
         action={`/connections/${p.conn.id}/delete`}

@@ -526,6 +526,17 @@ describe("macquarie robot check", async () => {
   });
 });
 
+describe("macquarie trusted browser name", async () => {
+  const { browserNickname } = await import("../src/providers/macquarie.js");
+  it("defaults to the app name and keeps only characters Macquarie allows", () => {
+    expect(browserNickname({})).toBe("Sure Bank Sync");
+    expect(browserNickname({ browserName: "Tye's Pi: home" })).toBe("Tye's Pi: home");
+    expect(browserNickname({ browserName: "sure-bank-sync" })).toBe("sure bank sync");
+    expect(browserNickname({ browserName: "---" })).toBe("Sure Bank Sync");
+    expect(browserNickname({ browserName: 42 })).toBe("Sure Bank Sync");
+  });
+});
+
 describe("macquarie csv", async () => {
   const { parseMacquarieCsv } = await import("../src/providers/macquarie.js");
   const acct = { id: "182-182 000000001", name: "Offset Account 1", currency: "AUD" };

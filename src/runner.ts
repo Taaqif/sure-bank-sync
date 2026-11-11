@@ -8,7 +8,7 @@ import { MfaBroker, MfaTimeout, RETRY, RetryLogin } from "./mfa.js";
 import { startRecording } from "./recorder.js";
 import { RemoteHub } from "./remote.js";
 import { maskAccountId, type BankStatement, type BankTransaction } from "./models.js";
-import { ALL_TIME_DAYS, PROVIDERS, syncDays, ProviderError, snapshot, type DateRange, type ProviderContext } from "./providers/index.js";
+import { ALL_TIME, ALL_TIME_DAYS, PROVIDERS, syncDays, ProviderError, snapshot, type DateRange, type ProviderContext } from "./providers/index.js";
 import type { BankProvider, ProviderDefinition } from "./providers/base.js";
 import { pushTransactions } from "./push.js";
 import { pushStatements } from "./pushStatements.js";
@@ -42,7 +42,12 @@ export interface RunOptions {
   debug?: boolean;
   /** record a person's steps as a named recipe (debug run). Ignored unless DEBUG_TOOLS. */
   train?: TrainOptions;
+  /** this run only: days back (ALL_TIME = all time) or exact dates, instead of the connection's setting */
+  period?: RunPeriod;
 }
+
+/** A one-off period for a manual run. */
+export type RunPeriod = { days: number } | DateRange;
 
 export interface TrainOptions {
   /** recipe name, e.g. "download" */
@@ -60,6 +65,7 @@ interface RunFlags {
   discover: boolean;
   debug: boolean;
   train?: TrainOptions;
+  period?: RunPeriod;
 }
 interface Scraped {
   txns: BankTransaction[];
@@ -344,7 +350,8 @@ export class Runner {
       const dryRun = discover || debug || (opts.dryRun ?? settings.dryRun);
       const runId = this.runs.start(connectionId, conn.userName, train ? "train" : discover ? "discover" : trigger, dryRun, kind);
       active.runId = runId;
-      await this.#run(runId, conn, settings, { kind, dryRun, discover, debug, train }, active);
+      const period = train || discover ? undefined : opts.period;
+      await this.#run(runId, conn, settings, { kind, dryRun, discover, debug, train, period }, active);
       return runId;
     } finally {
       this.#active.delete(connectionId);
@@ -379,13 +386,16 @@ export class Runner {
 
       const statements = flags.kind === "statements";
       if (statements && !def.statements) throw new ProviderError(`${def.label} can't import statements yet`);
-      const range = dateRange(settings.timezone, statements ? def.statements!.lookbackDays : syncDays(conn));
+      const p = flags.period;
+      const days = p && "days" in p ? (p.days === ALL_TIME ? ALL_TIME_DAYS : p.days) : statements ? def.statements!.lookbackDays : syncDays(conn);
+      const range = p && "since" in p ? { since: p.since, until: p.until } : dateRange(settings.timezone, days);
+      if (p) rlog("PERIOD: chosen for this run only (the connection's setting is unchanged)");
       if (statements) rlog("STATEMENTS: importing bank statements, not transactions");
       if (flags.train) rlog(`TRAIN: recording recipe "${flags.train.recipe}"; nothing fetched or written`);
       else if (flags.debug) rlog("DEBUG RUN: visible browser, network capture and downloads kept; nothing written to Sure");
       if (discover) rlog("DISCOVER: listing accounts only, no transactions fetched");
       else if (dryRun) rlog("DRY RUN: nothing will be written to Sure");
-      const allTime = !statements && syncDays(conn) === ALL_TIME_DAYS;
+      const allTime = !(p && "since" in p) && days === ALL_TIME_DAYS;
       rlog(`${conn.provider}, ${allTime ? `all time → ${range.until}` : `${range.since} → ${range.until}`}`);
       const bank = this.#bankLock(conn.provider);
       if (!bank.available) rlog(`waiting for another ${def.label} run to finish (one per bank at a time)`);

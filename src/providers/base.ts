@@ -198,6 +198,8 @@ export type SyncPeriod =
       note?: string;
       /** offer "All time" too (stored as ALL_TIME), e.g. for a first import */
       allTime?: boolean;
+      /** fetchTransactions honours any since/until, so a run can ask for exact dates */
+      customRange?: boolean;
     }
   | { fixed: string; label: string };
 
@@ -226,6 +228,8 @@ export interface ProviderDefinition {
    * schedule. Left out: the UI shows statement imports as not available.
    */
   statements?: StatementSupport;
+  /** what this bank reads from the connection's Options (JSON), shown under that box */
+  optionsHint?: string;
   /** where a Train recording starts when it isn't logging in first */
   startUrl?: string;
   /** still being built: login doesn't work yet, so Train starts logged out by default */

@@ -82,3 +82,9 @@ export const form = (data: Record<string, string>, headers: Record<string, strin
   body: new URLSearchParams(data),
   headers: { "Content-Type": "application/x-www-form-urlencoded", Host: "localhost", ...headers },
 });
+
+/** The one-time flash message a redirect sets ("" when none). */
+export function flash(r: Response): string {
+  const m = (r.headers.get("set-cookie") ?? "").match(/(?:^|[;,]\s*)sbs_flash=([^;]*)/);
+  return m ? decodeURIComponent(m[1]!) : "";
+}
