@@ -72,6 +72,9 @@ const DURATIONS = [7, 14, 30, 60, 90, 120];
 /** ANZ's Date range goes back this far ("You can download up to 2 years of transactions"). */
 const MAX_DAYS_BACK = 365 * 2;
 
+/** ANZ's answer when an account has no transactions in the period (not an error). */
+export const NO_HISTORY = /no history could be found|no transactions (were )?found/i;
+
 /** YYYY-MM-DD -> DD/MM/YYYY (ANZ's date boxes). */
 export const anzDmy = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
 
@@ -334,6 +337,12 @@ export const anz: ProviderDefinition = {
               )
               .catch(() => ""),
           ]);
+          if (problem && NO_HISTORY.test(problem)) {
+            // An account with nothing in the period: ANZ says so instead of downloading.
+            ctx.log(`anz: ${acct.name}: no transactions ${period}`);
+            for (const p of ctx.browser.pages()) if (p !== page) await p.close().catch(() => {});
+            continue;
+          }
           if (problem) {
             await snapshot(ctx, `anz-dates-${i}`);
             throw new ProviderError(`ANZ refused the dates ${period}: ${problem}`);

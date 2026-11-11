@@ -527,7 +527,11 @@ describe("macquarie robot check", async () => {
 });
 
 describe("anz date range", async () => {
-  const { anzDmy, anzRange } = await import("../src/providers/anz.js");
+  const { anzDmy, anzRange, NO_HISTORY } = await import("../src/providers/anz.js");
+  it("treats ANZ's no-history message as an empty account, not a failure", () => {
+    expect(NO_HISTORY.test("No history could be found that matched the criteria you have entered. Please try again.")).toBe(true);
+    expect(NO_HISTORY.test("Please enter a past date in Date Range.")).toBe(false);
+  });
   it("types dates as DD/MM/YYYY", () => {
     expect(anzDmy("2026-01-05")).toBe("05/01/2026");
   });
