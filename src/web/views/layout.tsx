@@ -20,8 +20,8 @@ export const UiContext = createContext({
   auth: false,
   /** who is signed in (password or OIDC login) */
   user: undefined as string | undefined,
-  /** runs waiting for a person in the browser view */
-  needsBrowser: [] as { connectionId: string; prompt: string }[],
+  /** runs waiting for a person: a code to type, or the browser view */
+  needs: [] as NeedItem[],
 });
 
 const CSS = `
@@ -160,7 +160,9 @@ table.storage tr.total td { font-weight: 600; }
 .cta small { display: block; color: var(--fg); margin-top: 2px; }
 .cta-btn { display: inline-block; padding: 9px 16px; border-radius: 8px; background: var(--warn); color: var(--bg); font-weight: 700; text-decoration: none; white-space: nowrap; }
 .cta-btn:hover { filter: brightness(1.1); }
-.needs:not(:empty) { border: 1px solid var(--warn); border-radius: 8px; padding: 10px 14px; margin: 8px 0; background: var(--card); }
+button.cta-btn { border: 0; cursor: pointer; font: inherit; font-weight: 700; }
+.cta-form { display: flex; gap: 8px; flex-wrap: wrap; margin: 0; }
+.cta-form input { width: 140px; font-size: 18px; letter-spacing: 2px; }
 .live { display: inline-flex; align-items: center; gap: 5px; margin-left: 8px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--run); color: var(--run); font-size: 10px; font-weight: 700; letter-spacing: .06em; vertical-align: middle; }
 .live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: live-pulse 2.4s ease-in-out infinite; }
 @keyframes live-pulse { 50% { opacity: .55; } }
@@ -229,18 +231,34 @@ export function BareLayout(props: { title: string; children?: Child }) {
 }
 
 /** "A run needs you in the browser" banner with a big button to the browser view. */
-export function NeedsBrowser(p: { items: { connectionId: string; prompt: string }[] }) {
+export interface NeedItem {
+  connectionId: string;
+  prompt: string;
+  kind: "code" | "browser";
+}
+
+/** The "needs you" call to action: a code box, or a link to the browser view. */
+export function NeedsYou(p: { items: NeedItem[] }) {
   return (
     <>
       {p.items.map((n) => (
         <div class="cta">
           <div>
-            <strong>Needs you in the browser</strong> · {n.connectionId}
+            <strong>{n.kind === "code" ? "Needs a code" : "Needs you in the browser"}</strong> · {n.connectionId}
             <small>{n.prompt}</small>
           </div>
-          <a class="cta-btn" href={`/connections/${encodeURIComponent(n.connectionId)}/remote`}>
-            Open browser view →
-          </a>
+          {n.kind === "code" ? (
+            <form method="post" action={`/connections/${encodeURIComponent(n.connectionId)}/mfa`} class="cta-form">
+              <input type="text" name="code" autocomplete="one-time-code" inputmode="numeric" placeholder="Code" aria-label="Code" required />
+              <button type="submit" class="cta-btn">
+                Submit code
+              </button>
+            </form>
+          ) : (
+            <a class="cta-btn" href={`/connections/${encodeURIComponent(n.connectionId)}/remote`}>
+              Open browser view →
+            </a>
+          )}
         </div>
       ))}
     </>
@@ -250,7 +268,7 @@ export function NeedsBrowser(p: { items: { connectionId: string; prompt: string 
 /* Keeps the banner current on pages that don't reload themselves. */
 const NEEDS_JS = `
 (() => {
-  const box = document.getElementById("needs-browser");
+  const box = document.getElementById("needs-banner");
   if (!box) return;
   let last = box.dataset.state || "";
   // Mark the tab title too, so a tab in the background shows it.
@@ -272,16 +290,35 @@ const NEEDS_JS = `
             div.className = "cta";
             const text = document.createElement("div");
             const strong = document.createElement("strong");
-            strong.textContent = "Needs you in the browser";
+            strong.textContent = n.kind === "code" ? "Needs a code" : "Needs you in the browser";
             const small = document.createElement("small");
             small.textContent = n.prompt;
             text.append(strong, " · " + n.connectionId, small);
-            const a = document.createElement("a");
-            a.className = "cta-btn";
-            a.href = "/connections/" + encodeURIComponent(n.connectionId) + "/remote";
-            a.textContent = "Open browser view →";
-            div.append(text, a);
-            box.append(div);
+            const base = "/connections/" + encodeURIComponent(n.connectionId);
+            if (n.kind === "code") {
+              const form = document.createElement("form");
+              form.method = "post";
+              form.action = base + "/mfa";
+              form.className = "cta-form";
+              const input = document.createElement("input");
+              Object.assign(input, { type: "text", name: "code", autocomplete: "one-time-code", inputMode: "numeric", placeholder: "Code", required: true });
+              input.setAttribute("aria-label", "Code");
+              const button = document.createElement("button");
+              button.type = "submit";
+              button.className = "cta-btn";
+              button.textContent = "Submit code";
+              form.append(input, button);
+              div.append(text, form);
+              box.append(div);
+              input.focus();
+            } else {
+              const a = document.createElement("a");
+              a.className = "cta-btn";
+              a.href = base + "/remote";
+              a.textContent = "Open browser view →";
+              div.append(text, a);
+              box.append(div);
+            }
           }
         }
       }
@@ -347,8 +384,8 @@ export function Layout(props: {
             {props.msg && <div class={`flash${msgIsError ? " error" : ""}`}>{props.msg}</div>}
             {props.error && <div class="flash error">{props.error}</div>}
             {!props.hideNeeds && (
-              <div id="needs-browser" data-state={JSON.stringify(ui.needsBrowser)}>
-                <NeedsBrowser items={ui.needsBrowser} />
+              <div id="needs-banner" data-state={JSON.stringify(ui.needs)}>
+                <NeedsYou items={ui.needs} />
               </div>
             )}
             {props.children}

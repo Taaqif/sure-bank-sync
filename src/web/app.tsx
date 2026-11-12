@@ -32,7 +32,7 @@ import {
   verifySession,
   type AuthConfig,
 } from "./auth.js";
-import { UiContext } from "./views/layout.js";
+import { type NeedItem, UiContext } from "./views/layout.js";
 import {
   ConnectionNewPage,
   LoginPage,
@@ -312,6 +312,8 @@ export function createApp(svc: Services) {
     return c.json({ error: "login_required" }, 401);
   });
 
+  /** Runs waiting for a person, for the banner on every page. */
+  const needsList = (): NeedItem[] => svc.mfa.pending().map((m) => ({ connectionId: m.connectionId, prompt: m.prompt, kind: m.kind }));
   const page = (c: Context, node: Child, status?: 200 | 400) =>
     c.html(
       <UiContext.Provider
@@ -320,10 +322,7 @@ export function createApp(svc: Services) {
           debugTools: DEBUG_TOOLS,
           auth: auth.mode !== "none",
           user: c.get("user") || undefined,
-          needsBrowser: svc.mfa
-            .pending()
-            .filter((m) => m.kind === "browser")
-            .map((m) => ({ connectionId: m.connectionId, prompt: m.prompt })),
+          needs: needsList(),
         }}
       >
         {node}
@@ -386,14 +385,7 @@ export function createApp(svc: Services) {
   );
 
   // Live preview for the schedule picker.
-  app.get("/api/needs", (c) =>
-    c.json(
-      svc.mfa
-        .pending()
-        .filter((m) => m.kind === "browser")
-        .map((m) => ({ connectionId: m.connectionId, prompt: m.prompt })),
-    ),
-  );
+  app.get("/api/needs", (c) => c.json(needsList()));
 
   app.get("/api/cron-preview", (c) => {
     const s = store.settings();
@@ -912,8 +904,18 @@ export function createApp(svc: Services) {
 
   app.post("/connections/:id/mfa", async (c) => {
     const b = await c.req.parseBody();
-    svc.mfa.submit(c.req.param("id"), str(b, "code"));
-    return redirect(c, "/");
+    const code = str(b, "code");
+    // Back to the page the code was typed on. Only the path is used, so it stays on this site.
+    let back = "/";
+    try {
+      const ref = new URL(c.req.header("referer") ?? "/", "http://x");
+      if (!ref.pathname.startsWith("//")) back = ref.pathname + ref.search;
+    } catch {
+      // no usable referer
+    }
+    if (svc.mfa.get(c.req.param("id"))?.kind !== "code" || !code) return redirect(c, back, "Error: nothing is waiting for a code (it may have timed out)");
+    svc.mfa.submit(c.req.param("id"), code);
+    return redirect(c, back, "Code sent");
   });
 
   // --- logs -----------------------------------------------------------------

@@ -5,7 +5,7 @@ import { ALL_TIME, periodChoices, syncLabel, type ProviderDefinition } from "../
 import type { Connection, Settings, User } from "../../store.js";
 import type { SureAccount } from "../../sureClient.js";
 import { useContext } from "hono/jsx";
-import { BareLayout, Layout, NeedsBrowser, UiContext, Version } from "./layout.js";
+import { BareLayout, Layout, NeedsYou, UiContext, Version } from "./layout.js";
 import { RECIPE_SUGGESTIONS, type RecordedStep, type Recording } from "../../recorder.js";
 import { Badge, CredentialInputs, RunsTable, ago, formatWhen } from "./parts.js";
 import { LookbackField, SCHEDULE_JS, ScheduleField, periodLabel } from "./schedule.js";
@@ -86,23 +86,8 @@ export function DashboardStatus(p: DashboardProps) {
       {p.rows
         .filter((r) => r.mfa)
         .map((r) => (
-          <div class="mfa attention" id="needs-you">
-            <strong>
-              {r.conn.userName} · {r.conn.id}
-            </strong>{" "}
-            {r.mfa!.kind === "browser" ? (
-              <div style="margin-top:8px">
-                <NeedsBrowser items={[{ connectionId: r.conn.id, prompt: r.mfa!.prompt }]} />
-              </div>
-            ) : (
-              <>
-                needs a code: {r.mfa!.prompt}
-                <form method="post" action={`/connections/${r.conn.id}/mfa`}>
-                  <input type="text" name="code" autocomplete="one-time-code" inputmode="numeric" required />
-                  <button type="submit">Submit</button>
-                </form>
-              </>
-            )}
+          <div id="needs-you">
+            <NeedsYou items={[{ connectionId: r.conn.id, prompt: r.mfa!.prompt, kind: r.mfa!.kind }]} />
           </div>
         ))}
 
@@ -1223,7 +1208,6 @@ const RUN_LIVE_JS = `
   const pre = document.getElementById("run-log");
   const badge = document.getElementById("run-badge");
   const stats = document.getElementById("run-stats");
-  const needs = document.getElementById("run-needs");
   let offset = Number(root.dataset.logLength);
   let timer;
   const atBottom = () => window.innerHeight + window.scrollY >= document.body.scrollHeight - 60;
@@ -1241,13 +1225,6 @@ const RUN_LIVE_JS = `
         badge.className = "badge " + d.status;
         badge.textContent = d.status === "awaiting_mfa" ? "needs you" : d.status;
         stats.textContent = d.stats;
-        needs.innerHTML = "";
-        if (d.needs && d.needs.kind !== "browser") {
-          const a = document.createElement("a");
-          a.href = d.needs.kind === "browser" ? "/connections/" + encodeURIComponent(root.dataset.conn) + "/remote" : "/#needs-you";
-          a.textContent = d.needs.kind === "browser" ? "Open browser" : "Enter code on the dashboard";
-          needs.append("Needs you: " + d.needs.prompt + " ", a);
-        }
         if (follow) window.scrollTo(0, document.body.scrollHeight);
         if (d.finished) { location.reload(); return; }
       }
@@ -1282,7 +1259,6 @@ export const RunPage = (p: { run: Run; shots: string[]; logs?: string[]; recordi
       <br />
       <span id="run-stats">{runStats(p.run)}</span>
     </p>
-    {live && <div id="run-needs" class="needs" />}
     {p.run.error && <pre class="failed">{p.run.error}</pre>}
     <h2>Log{live && <LiveBadge />}</h2>
     <pre id="run-log" data-empty={p.run.log ? undefined : "1"}>

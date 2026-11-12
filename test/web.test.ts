@@ -221,6 +221,31 @@ describe("web", () => {
     expect((await input({ type: "key", key: "a" })).status).toBe(404);
   }, 60_000);
 
+  it("asks for a code in the banner on every page and goes back after", async () => {
+    const env = setup();
+    const { app, mfa } = makeApp(env);
+    const id = env.store.saveConnection(null, {
+      userId: env.userId, provider: "demo", enabled: false, schedule: null, lookbackDays: null, credentials: {}, options: {},
+    });
+    const runId = env.runs.start(id, "alice", "manual");
+    env.runs.setStatus(runId, "awaiting_mfa");
+    const code = mfa.request(id, runId, "Type the SMS code", 60_000);
+    for (const path of ["/", `/connections/${id}`, `/runs/${runId}`, "/logs"]) {
+      const html = await (await get(app, path)).text();
+      expect(html).toContain("Needs a code");
+      expect(html).toContain(`action="/connections/${id}/mfa"`);
+    }
+    expect(await (await get(app, "/api/needs")).json()).toEqual([{ connectionId: id, prompt: "Type the SMS code", kind: "code" }]);
+
+    const send = (value: string) =>
+      app.request(`/connections/${id}/mfa`, form({ code: value }, { Referer: `http://localhost/runs/${runId}?tab=1` }));
+    const r = await send(" 123 456 ");
+    expect(r.headers.get("location")).toBe(`/runs/${runId}?tab=1`);
+    expect(flash(r)).toBe("Code sent");
+    expect(await code).toBe("123 456");
+    expect(flash(await send("1"))).toMatch(/nothing is waiting/);
+  });
+
   it("shows the version in the nav and on the login page", async () => {
     const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
     const env = setup();
