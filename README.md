@@ -1,277 +1,122 @@
 # sure-bank-sync
 
-Scrapes transactions from your banks on a schedule and pushes them into a
-self-hosted [Sure](https://github.com/we-promise/sure) instance. Built for a
-shared household: each person has their own Sure API key and bank logins,
-all managed from a small web UI.
+Pulls transactions from your banks on a schedule and imports them into a
+self-hosted [Sure](https://github.com/we-promise/sure). Built for a household:
+each person has their own Sure API key and bank logins, managed from one small
+web UI.
 
-Supported banks: **ANZ Internet Banking** (AU), **American Express** (AU),
-**CommBank NetBank** (AU), **Macquarie Bank** (AU), and the broker
-**Stake** (AU, ASX and AUD only).
-`demo` is a fake bank for testing the pipeline.
-
-Stack: Node + TypeScript, Playwright, Hono (server-rendered JSX), SQLite via
-Drizzle, croner.
-
-## How it works
+There are no bank APIs or aggregators involved. It logs in to each bank's own
+website with a real browser (Playwright), downloads or reads the transactions,
+and sends them to Sure's API.
 
 ```mermaid
 flowchart LR
-  T["Schedule<br/>or Run now"] --> R["Runner"]
-  R --> C["Chromium<br/>(own profile per connection)"]
-  C <--> BK["Bank website"]
-  BK -. "CAPTCHA / robot check / code" .-> Y["You<br/>browser view or code box"]
-  Y -. "solved" .-> BK
-  C -- "CSV download" --> P["Parse and map<br/>to Sure accounts"]
-  P --> D{"Already<br/>synced?"}
-  D -- "yes" --> X["Skip"]
-  D -- "new" --> I["One CSV import per account<br/>POST /api/v1/imports"]
-  I --> S[("Sure")]
-  S -- "import complete" --> DB[("Synced record<br/>(SQLite)")]
+  T["Schedule / Run now"] --> C["Browser<br/>(saved profile per connection)"]
+  C <--> B["Bank website"]
+  B -. "code or robot check" .-> Y["You, in the web UI"]
+  C --> P["Map to Sure accounts<br/>skip anything already sent"]
+  P --> S[("Sure")]
 ```
 
-- **Web UI for everything**: household members (each with a Sure API key),
-  bank connections, account mapping, schedules and sync periods.
-- **Secrets encrypted** with `SURE_SYNC_SECRET_KEY` and never shown again.
-- **Map once**: the first run (or **Discover accounts**) lists the bank's
-  accounts; pick the Sure account for each. Unmapped accounts are skipped.
-- **No duplicates**: a local record of what Sure confirmed, plus a check of
-  the Sure account for a transaction on the same date with the same amount,
-  makes re-runs and overlapping periods safe, even after you rename a
-  transaction or mark it a transfer in Sure. Imports can be reverted in Sure
-  as a batch.
-- **A person for the hard parts**: codes go in a box on the dashboard;
-  CAPTCHAs and robot checks open a live browser view. Nothing is solved
-  automatically.
-- **Safe to try**: **Dry run** logs what would be sent and writes nothing.
-  Logs hide transactions and show only the last 4 digits of account numbers
-  unless **Verbose logs** is on.
-- **Run pages** show the live log, and screenshots and page HTML when a run
-  fails. Runs can be cancelled at any time.
-- **Runs queue politely**: scheduled runs start up to 2 minutes apart, each
-  bank runs one connection at a time, and at most **Browsers at once**
-  (Settings, default 2) work together. This covers every kind of run (sync,
-  dry run, discover). Waiting runs show as **queued**; a run waiting for you
-  hands its place to the next one. On a small server, set Browsers at once
-  to 1.
-- **Pause schedules** for everyone in Settings: transaction syncs and
-  statement imports have their own switch. Run now still works.
+## What it does
+
+- **Syncs on a schedule** per connection, or on demand, for any period up to
+  the bank's limit.
+- **Maps bank accounts to Sure accounts** once; unmapped accounts are skipped.
+- **Never sends a transaction twice**: it keeps a record of what Sure accepted
+  and checks Sure for matching rows, so overlapping periods are safe.
+- **Hands the hard parts to a person**: SMS/app codes go in a box in the web UI,
+  and CAPTCHAs or robot checks open a live view of the bank's page. Nothing is
+  solved automatically.
+- **Keeps secrets encrypted** at rest, and logs hide transaction details unless
+  you turn verbose logs on.
+- **Dry run** mode shows what would be sent without writing to Sure.
+
+## How it's organised
+
+```mermaid
+flowchart LR
+  H["Household"] --> P1["Person<br/>(own Sure API key)"]
+  P1 --> C1["Connection: ANZ login"]
+  P1 --> C2["Connection: Amex login"]
+  C1 --> A1["Bank account"] --> S1["Sure account"]
+  C1 --> A2["Bank account"] --> S2["Sure account"]
+  C2 --> A3["Card"] --> S3["Sure account"]
+```
+
+- **Person**: someone whose banks are synced, into their own Sure accounts.
+- **Connection**: one bank login for that person, e.g. `alice-anz`.
+- **Account**: each account the login can see, mapped once to a Sure account.
+
+## Supported banks
+
+| Bank | Imports | Notes |
+| --- | --- | --- |
+| ANZ Internet Banking | Transactions | Up to 2 years back. |
+| American Express (AU) | Card transactions | Any date range. |
+| Brighten | Home loan transactions | SMS code at login; reads the portal's API. |
+| CommBank NetBank | Transactions, statement PDFs | Log on approved in the CommBank app. |
+| Macquarie Bank (AU) | Transactions | Robot check and SMS codes go to you. |
+| Stake | ASX trades, dividends, AUD cash | AUD only; 2FA code generated from your secret. Imported as trades into an Investment account. |
+| Demo bank | Fake data | For testing the pipeline. |
+
+Adding a bank means writing one provider file (see [Development](#development)).
 
 ## Quick start
 
-Needs Docker with the compose plugin. Copy and paste:
+Needs Docker with the compose plugin.
 
 ```bash
-# 1. Make a folder and download the compose file and settings template
 mkdir sure-bank-sync && cd sure-bank-sync
 curl -fsSL -o docker-compose.yml \
   https://raw.githubusercontent.com/Taaqif/sure-bank-sync/main/deploy/docker-compose.yml
 curl -fsSL -o .env \
   https://raw.githubusercontent.com/Taaqif/sure-bank-sync/main/.env.example
 
-# 2. Create the encryption key for saved logins
+# encryption key for saved logins, and a web UI password (user: admin)
 sed -i "s|^SURE_SYNC_SECRET_KEY=.*|SURE_SYNC_SECRET_KEY=$(openssl rand -hex 32)|" .env
-
-# 3. Set a password for the web UI (user: admin)
 PASS=$(openssl rand -base64 18)
 sed -i "s|^SURE_SYNC_ADMIN_PASSWORD=.*|SURE_SYNC_ADMIN_PASSWORD=$PASS|" .env
 echo "Web UI login: admin / $PASS"
 
-# 4. Start it
 chmod 600 .env
 docker compose up -d
 ```
 
-Open `http://<your-server>:8686`, sign in, and follow the steps on the
-dashboard (the [first-time setup](#first-time-setup) below explains each one).
+Open `http://<your-server>:8686`. The dashboard walks you through the rest:
+Sure's URL, a Sure API key per person, then a connection per bank login.
 
-**Back up `.env`** (it holds `SURE_SYNC_SECRET_KEY`) and the Docker volume
-`sure-bank-sync-data`. Without the key, saved logins can't be decrypted.
-
-To update: `docker compose pull && docker compose up -d`. To use Pocket ID or
-another OIDC provider instead of a password, or to run behind Caddy or
-Traefik, see [Configuration](#configuration) and
-[docs/self-hosting.md](docs/self-hosting.md).
-
-### First-time setup
-
-1. **Settings** → Sure URL (as seen from the container, e.g.
-   `http://host.docker.internal:3000` if Sure runs on the same host, or its
-   service name if you join Sure's compose network).
-2. **Household** → add each person with a Sure API key (Sure → Settings →
-   API Keys, read/write).
-3. **Add connection** → pick the bank and enter the login → **Discover
-   accounts** → map each bank account to a Sure account → **Run now**.
-
-### Building from source
-
-```bash
-git clone https://github.com/Taaqif/sure-bank-sync.git && cd sure-bank-sync
-cp .env.example .env    # set SURE_SYNC_SECRET_KEY and a login
-docker compose up -d --build
-```
+Back up `.env` (it holds the encryption key) and the `sure-bank-sync-data`
+volume. Without the key, saved logins can't be read. Update with
+`docker compose pull && docker compose up -d`.
 
 ## Configuration
 
-All set with environment variables in `.env`. Only `SURE_SYNC_SECRET_KEY` is
-required; everything else (Sure URL, household, banks, schedules) is set in
-the web UI.
+Only `SURE_SYNC_SECRET_KEY` is required. Everything else about banks, people
+and schedules lives in the web UI. The main environment variables:
 
-| Variable | Default | What |
-| --- | --- | --- |
-| `SURE_SYNC_SECRET_KEY` | (required) | Encrypts saved logins and API keys. Generate with `openssl rand -hex 32`; back it up. |
-| **Login** | | |
-| `SURE_SYNC_AUTH` | see below | `password`, `oidc` or `none`. Unset: `password` if a password is set, else `oidc` if an issuer is set, else `none`. |
-| `SURE_SYNC_ADMIN_USER` | `admin` | Password mode user name. |
-| `SURE_SYNC_ADMIN_PASSWORD` | | Password mode password. |
-| `SURE_SYNC_OIDC_ISSUER` | | Provider's issuer URL, e.g. `https://id.example.com` (Pocket ID). |
-| `SURE_SYNC_OIDC_CLIENT_ID` | | Client ID from the provider. |
-| `SURE_SYNC_OIDC_CLIENT_SECRET` | | Client secret; leave empty for a public (PKCE) client. |
-| `SURE_SYNC_OIDC_NAME` | `single sign-on` | Sign-in button text, e.g. `Pocket ID`. |
-| `SURE_SYNC_OIDC_ALLOWED_EMAILS` | anyone | Comma-separated verified emails allowed in. |
-| `SURE_SYNC_OIDC_ALLOWED_GROUPS` | anyone | Comma-separated groups allowed in (either list matching is enough). |
-| `SURE_SYNC_OIDC_GROUPS_CLAIM` | `groups` | Claim that lists the user's groups. |
-| `SURE_SYNC_OIDC_SCOPES` | `openid email profile` | Scopes to request (`groups` is added when groups are required). |
-| **Reverse proxy** | | |
-| `SURE_SYNC_PUBLIC_URL` | from request | External URL, e.g. `https://sync.example.com`. Needed for OIDC behind a proxy. |
-| `SURE_SYNC_TRUST_PROXY` | off | `1` to trust `X-Forwarded-*` headers. Only when the proxy is the only way in. |
-| **Server** | | |
-| `HOST_PORT` | `8686` | Port on the host (docker compose). |
-| `SURE_SYNC_PORT` | `8686` | Port inside the container. |
-| `SURE_SYNC_HOST` | `0.0.0.0` | Listen address. |
-| `SURE_SYNC_DATA_DIR` | `/data` | Database, browser profiles, logs and debug files. |
-| `SURE_SYNC_LOG_MAX_BYTES` | `5000000` | App log size before it rotates (one old file kept). |
-| `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`. |
-| `TZ` | `Australia/Melbourne` | Container time zone (schedules use the one in Settings). |
-| **Development** | | |
-| `SURE_SYNC_DEBUG` | off | `1` adds Debug run and Train. |
-| `SURE_SYNC_HEADLESS` | off | `1` runs Chromium headless instead of on the virtual screen. |
-| `SURE_SYNC_SLOWMO` | `150` | Milliseconds between browser actions in debug runs. |
-| `SURE_SYNC_PAUSE_ON_ERROR` | off | `1` opens the Playwright Inspector when a debug run fails. |
+| Variable | What |
+| --- | --- |
+| `SURE_SYNC_SECRET_KEY` | Encrypts saved logins and API keys (`openssl rand -hex 32`). |
+| `SURE_SYNC_AUTH` | `password`, `oidc` (Pocket ID, Authelia, Authentik…) or `none` (only behind a proxy that logs you in). |
+| `SURE_SYNC_ADMIN_PASSWORD` | Password for the `admin` login. |
+| `SURE_SYNC_OIDC_*` | Issuer, client ID/secret and allowed emails or groups for single sign-on. |
+| `SURE_SYNC_PUBLIC_URL`, `SURE_SYNC_TRUST_PROXY` | For running behind Caddy, Traefik or nginx. |
+| `HOST_PORT` | Port on the host (default `8686`). |
 
-Pocket ID example:
+The full list is in [.env.example](.env.example). Login, single sign-on and
+reverse proxy setup: [docs/self-hosting.md](docs/self-hosting.md).
 
-```bash
-SURE_SYNC_AUTH=oidc
-SURE_SYNC_PUBLIC_URL=https://sync.example.com
-SURE_SYNC_OIDC_ISSUER=https://id.example.com
-SURE_SYNC_OIDC_CLIENT_ID=<client id>
-SURE_SYNC_OIDC_CLIENT_SECRET=<client secret>
-SURE_SYNC_OIDC_NAME=Pocket ID
-SURE_SYNC_OIDC_ALLOWED_EMAILS=alice@example.com,bob@example.com
-```
+## Security
 
-Register `https://sync.example.com/auth/oidc/callback` as the callback URL in
-the provider. Other providers, forward-auth setups and Caddy / Traefik / nginx
-examples: [docs/self-hosting.md](docs/self-hosting.md).
+The container holds bank logins and logged-in browser sessions, so treat it
+like a password manager:
 
-## Development: watching the browser
-
-Normal runs use Chrome with a real window on an invisible virtual screen
-(Xvfb, included in the Docker image), because Amex blocks windowless
-(headless) Chrome. If Xvfb is missing the app falls back to headless and says
-so in the run log; `SURE_SYNC_HEADLESS=1` forces headless. Start the app with
-`SURE_SYNC_DEBUG=1` and each connection gets a **Debug run** button: a dry run
-with a visible, slowed down browser (needs a display, e.g. WSLg on Windows)
-that also saves the bank's JSON responses and downloaded files to the run's
-debug folder.
-
-```bash
-SURE_SYNC_DEBUG=1 SURE_SYNC_PORT=8687 npm run dev
-# SURE_SYNC_PAUSE_ON_ERROR=1 opens the Playwright Inspector when a debug run fails
-```
-
-Run logs include every page the browser visits (`nav: …`, query strings
-stripped).
-
-## Banks
-
-**American Express (AU)**: logs in with User ID + password (ticks Remember
-Me, and reuses the remembered User ID), hands any CAPTCHA to you through the
-browser view and any identity check to the code box. Transactions come from
-the activity search page: it types the sync period into Date Range, presses
-Search and reads the posted transactions the page loads (any range, like the
-other banks), so it isn't limited to the current statement.
-
-**CommBank NetBank (AU)**: logs in with client number + password (reuses a
-client number NetBank remembers, or replaces it if it's a different one),
-waits for you to approve the log on in the CommBank app (the browser view is
-open in case it asks for a code instead) and skips the "new look" welcome. Reads
-the accounts table on the home page, then for each account: Download
-transaction summary → types the From/To dates for the sync period → CSV →
-Download. Statements (optional, own schedule): View statements → each account →
-each financial year in range → downloads every statement PDF issued in the last
-200 days (statements are 6-monthly; the default statement schedule is the 15th
-of January and July). Sure has no statement upload API yet, so statement runs
-only log what they would send.
-
-**Macquarie Bank (AU)**: logs in with Macquarie ID + password, hands the
-"I'm not a robot" check (and anything it doesn't recognise) to you through the
-browser view, trusts the browser when asked and sends SMS codes to the code
-box. For each account it sets the transactions date filter to the sync period
-(Add filter → Date range → Custom), then Download → .CSV. Accounts with no
-transactions in the period are skipped.
-
-**Stake (AU, ASX and AUD only)**: Australian shares and the AUD cash wallet.
-Wall St (USD) isn't imported. Logs in with email + password and types the 2FA
-code itself from the 2FA secret (the setup key or `otpauth://` link you got
-when turning 2FA on). Stake has no CSV export, so it reads the JSON the Stake
-web app loads: AUD deposits, withdrawals and dividends, and ASX buys and sells.
-Map it to an **Investment** account in Sure. Each row goes in through Sure's
-trades API (buys and sells with units, price and brokerage, so Sure tracks the
-holdings). Before sending, it skips anything already in that Sure account,
-including rows entered by hand: cash movements match on amount, buys and sells
-on ticker + units, with dates up to 5 days apart (trade date vs settlement
-date). Dividends whose share can't be told for sure are skipped and logged.
-The sync period has an **All time** choice for a first import of your whole
-history; switch back to a shorter one afterwards.
-Still being finished: the login and API mapping need a live check.
-
-**ANZ Internet Banking**: logs in with CRN + password, reads the account tiles
-on the home page, then for each account clicks the tile → Download, picks a
-duration covering the lookback (max 120 days) with "Microsoft Excel(CSV)", and
-parses the file (date, signed amount, description).
-
-## When a bank needs you
-
-CAPTCHAs, "not a robot" checks and unknown login screens are handed to a
-person: every page shows an orange **Needs you in the browser** banner, and
-**Open browser view** streams the bank's page so you can click, type, paste
-and scroll (works on phones too). One-time codes are typed into the code box
-on the dashboard. The run carries on once the step is done. If the page gets
-stuck, **Retry** starts the login again from the bank's login page (up to 5
-times per run). Nothing solves these checks automatically.
-
-Runs that log in often get checked more, so keep each connection's schedule
-to about once a day and don't clear saved browsers unless you need to.
-
-## Storage
-
-**Settings → Storage** shows what uses disk space (database and run logs,
-debug files, app log, saved browsers) and lets you clean each up, or
-**Delete everything** (type DELETE to confirm). Settings, household, logins,
-account mappings and the synced-transaction record are always kept; the
-synced record is what stops transactions being sent to Sure twice.
-
-## Train (development)
-
-With `SURE_SYNC_DEBUG=1`, each connection has a **Train** section: pick a
-recipe (date-filter, download, discover, login or your own name), and the
-app opens the bank (logged in with the stored login, or at its login page),
-then records each click, typed value, key press and download until you press
-**Finish recording**. The run page lists every step with selector candidates,
-a screenshot, the page HTML and a suggested Playwright call; the steps are
-also saved as `recipe-<name>.json` in the run's debug folder. Password and
-code fields are never recorded, and values that match the stored login are
-saved as `{{username}}`-style placeholders. Use it to write a new provider or
-fix one after a bank changes its site.
-
-## CLI
-
-```bash
-docker compose run --rm sure-bank-sync --generate-key   # same as openssl rand -hex 32
-docker compose run --rm sure-bank-sync --run alice-anz   # one run, print log, exit
-```
+- Always use a login (`password` or `oidc`), and serve it over HTTPS on your
+  LAN or behind a VPN.
+- Protect `.env` and the data volume.
+- **Bank sessions** (off by default in Settings) let anyone using the web UI
+  open a logged-in bank site. Only turn it on when you need it.
 
 ## Development
 
@@ -281,78 +126,36 @@ npx playwright install chromium
 cp .env.example .env   # set SURE_SYNC_SECRET_KEY
 npm run dev            # http://localhost:8686, data in ./data
 npm test
-npm run typecheck
 ```
 
-Schema changes: edit `src/db/schema.ts`, run `npm run db:generate`, commit the
-new file in `drizzle/`. Migrations apply automatically on start.
+Stack: Node + TypeScript, Playwright, Hono (server-rendered JSX), SQLite via
+Drizzle. Schema changes: edit `src/db/schema.ts`, then `npm run db:generate`.
 
-### Layout
+`SURE_SYNC_DEBUG=1` adds **Debug run** (visible, slowed-down browser that saves
+the bank's network data) and **Train** (records your clicks in the bank's site,
+with screenshots, to build or fix a provider).
+
+**Adding a bank**: create `src/providers/<bank>.ts` exporting a
+`ProviderDefinition` (login fields, `login()`, `fetchTransactions()`) and
+register it in `src/providers/index.ts`. Amounts are integer cents, negative =
+money out. Existing providers show both styles: reading downloads from the
+bank's pages, or calling the JSON API the bank's own site uses (Stake,
+Brighten).
 
 | Path | What |
 | --- | --- |
-| `src/main.ts` | entry point, env, CLI flags |
-| `src/store.ts` | config (settings, people, connections, account mappings) |
-| `src/runs.ts` | run history, synced-transaction record |
-| `src/runner.ts` | one sync: browser, provider, push |
-| `src/push.ts` | mapping, dedupe, upload to Sure |
-| `src/scheduler.ts` | cron jobs, reloaded on config change |
-| `src/providers/` | bank scrapers |
-| `src/web/` | Hono routes + JSX views |
-
-### Adding a bank
-
-Create `src/providers/<bank>.ts` exporting a `ProviderDefinition` (name,
-label, credential fields, `create(ctx)` returning `login()` and
-`fetchTransactions({ since, until })`), and register it in
-`src/providers/index.ts`. Use `ctx.browser` (Playwright context),
-`ctx.requestMfa(prompt)` and `snapshot(ctx, name)`. Amounts are integer cents,
-negative = money out.
+| `src/providers/` | One file per bank |
+| `src/runner.ts` | One run: browser, provider, push to Sure |
+| `src/push.ts` | Account mapping, duplicate checks, Sure imports |
+| `src/web/` | Web UI (routes and views) |
+| `src/store.ts`, `src/runs.ts` | Settings, connections, run history |
 
 ## Releasing
 
-`.github/workflows/ci.yml` runs the type check and tests on every push and
-pull request. Pushing a release tag (`vX.Y.Z`, nothing after it) also builds
-the Docker image and publishes it to GitHub Container Registry as `X.Y.Z`,
-`X.Y` and `latest`. Push only the tag you're releasing:
+CI runs type checks and tests on every push. Pushing a `vX.Y.Z` tag also
+publishes the Docker image to GitHub Container Registry as `X.Y.Z`, `X.Y` and
+`latest`.
 
 ```bash
-git tag -a v0.1.0 -m "v0.1.0"
-git push origin main v0.1.0
-# image: ghcr.io/<your-github-user>/sure-bank-sync:0.1.0 (and :latest)
+git tag -a v1.2.3 -m "v1.2.3" && git push origin main v1.2.3
 ```
-
-Deploying on a server:
-
-1. Copy `docker-compose.yml` and your `.env` to the server. Keep the same
-   `SURE_SYNC_SECRET_KEY`: without it saved logins can't be read.
-2. In `docker-compose.yml`, delete the `build: .` line and set
-   `image: ghcr.io/<your-github-user>/sure-bank-sync:latest`.
-3. GHCR packages start private: make the package public, or run
-   `docker login ghcr.io` on the server with a token that can read packages.
-4. `docker compose pull && docker compose up -d`. To update later, run the
-   same command again.
-
-Data lives in the Docker volume `sure-bank-sync-data` (a fixed name, so it
-doesn't depend on the folder). Back it up with your `.env`.
-
-To change the port, set `HOST_PORT` (the port on the server) in `.env`.
-`SURE_SYNC_PORT` changes the port inside the container; the compose file and
-health check follow it.
-
-## Login and reverse proxies
-
-Set `SURE_SYNC_AUTH` to `oidc` (sign in with Pocket ID, Authelia, Authentik,
-Keycloak, Google…), `password` (one admin login) or `none` (only behind a proxy
-that already requires a login). Behind Caddy, Traefik or nginx also set
-`SURE_SYNC_TRUST_PROXY=1` and `SURE_SYNC_PUBLIC_URL`. Setup steps, provider
-notes and proxy examples: [docs/self-hosting.md](docs/self-hosting.md).
-
-## Security notes
-
-The container holds bank logins and logged-in browser sessions. Serve the UI
-over HTTPS on your LAN or behind a VPN/reverse proxy, always use a login
-(`oidc` or `password`, or `none` only behind forward auth), and protect the
-`/data` volume and your `.env`. Anyone with the admin login
-can change any household member's bank connection (but can't read saved
-passwords back).
