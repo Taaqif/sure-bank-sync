@@ -233,6 +233,7 @@ describe("web", () => {
     for (const path of ["/", `/connections/${id}`, `/runs/${runId}`, "/logs"]) {
       const html = await (await get(app, path)).text();
       expect(html).toContain("Needs a code");
+      expect(html).toMatch(/<title>\(1\) Needs you · /);
       expect(html).toContain(`action="/connections/${id}/mfa"`);
     }
     expect(await (await get(app, "/api/needs")).json()).toEqual([{ connectionId: id, prompt: "Type the SMS code", kind: "code" }]);
@@ -244,7 +245,37 @@ describe("web", () => {
     expect(flash(r)).toBe("Code sent");
     expect(await code).toBe("123 456");
     expect(flash(await send("1"))).toMatch(/nothing is waiting/);
+    expect(await (await get(app, "/logs")).text()).not.toMatch(/<title>\(\d+\) Needs you/);
   });
+
+  it("opens a bank session only when Settings allows it", async () => {
+    const env = setup();
+    const { app, mfa } = makeApp(env);
+    const id = env.store.saveConnection(null, {
+      userId: env.userId, provider: "demo", enabled: false, schedule: null, lookbackDays: null, credentials: {}, options: {},
+    });
+    expect(await (await get(app, `/connections/${id}`)).text()).not.toContain("Open bank session");
+    const off = await app.request(`/connections/${id}/session`, form({}));
+    expect(flash(off)).toMatch(/turn on Bank sessions/);
+
+    env.store.saveSettings({ ...env.store.settings(), bankSessions: true });
+    expect(await (await get(app, `/connections/${id}`)).text()).toContain("Open bank session");
+    const on = await app.request(`/connections/${id}/session`, form({}));
+    expect(on.headers.get("location")).toBe(`/connections/${id}/remote`);
+    for (let i = 0; i < 300 && mfa.get(id)?.kind !== "browser"; i++) await new Promise((r) => setTimeout(r, 50));
+    expect(mfa.get(id)?.prompt).toContain("End session");
+    mfa.submit(id, "done");
+    let run;
+    for (let i = 0; i < 300; i++) {
+      run = [...Array(5).keys()].map((n) => env.runs.get(n + 1)).find((r) => r?.trigger === "session");
+      if (run && run.status === "success") break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(run?.status).toBe("success");
+    expect(run?.dryRun).toBe(true);
+    expect(run?.log).toContain("bank session ended");
+    expect(run?.log).not.toContain("visible window"); // only ever shown through the browser view
+  }, 60_000);
 
   it("shows the version in the nav and on the login page", async () => {
     const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));

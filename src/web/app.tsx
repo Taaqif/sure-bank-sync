@@ -498,6 +498,7 @@ export function createApp(svc: Services) {
       dryRun: b.dryRun === "on",
       saveNetworkLog: b.saveNetworkLog === "on",
       verboseLogs: b.verboseLogs === "on",
+      bankSessions: b.bankSessions === "on",
     };
     try {
       store.saveSettings(input);
@@ -779,6 +780,16 @@ export function createApp(svc: Services) {
     if (!store.connection(id)) return c.notFound();
     const ok = svc.runner.cancel(id);
     return redirect(c, `/connections/${id}#runs`, ok ? `Cancelled the run of ${id}` : `${id} isn't running`);
+  });
+
+  // Bank session (Settings switch): log in, then hand the bank's site to the person in the browser view.
+  app.post("/connections/:id/session", (c) => {
+    const id = c.req.param("id");
+    if (!store.connection(id)) return c.notFound();
+    if (!store.settings().bankSessions) return redirect(c, `/connections/${id}`, "Error: turn on Bank sessions in Settings first");
+    if (svc.runner.isRunning(id)) return redirect(c, `/connections/${id}`, "Error: wait for the current run to finish");
+    svc.runner.startBackground(id, { session: true });
+    return c.redirect(`/connections/${id}/remote`, 303);
   });
 
   // Train (debug tools only): record a person's steps as a named recipe.

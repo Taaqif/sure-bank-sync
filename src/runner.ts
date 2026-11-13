@@ -44,6 +44,8 @@ export interface RunOptions {
   train?: TrainOptions;
   /** this run only: days back (ALL_TIME = all time) or exact dates, instead of the connection's setting */
   period?: RunPeriod;
+  /** log in, then hand the bank's site to a person in the browser view; nothing fetched or written. Needs the bankSessions setting. */
+  session?: boolean;
 }
 
 /** A one-off period for a manual run. */
@@ -58,6 +60,8 @@ export interface TrainOptions {
 
 /** A person gets this long to record a recipe. */
 const TRAIN_TIMEOUT_MS = 30 * 60_000;
+/** A bank session ends by itself after this long. */
+const SESSION_TIMEOUT_MS = 30 * 60_000;
 
 interface RunFlags {
   kind: RunKind;
@@ -66,6 +70,7 @@ interface RunFlags {
   debug: boolean;
   train?: TrainOptions;
   period?: RunPeriod;
+  session: boolean;
 }
 interface Scraped {
   txns: BankTransaction[];
@@ -343,15 +348,16 @@ export class Runner {
     this.#active.set(connectionId, active);
     try {
       const settings = this.store.settings();
-      const train = DEBUG_TOOLS ? opts.train : undefined;
-      const debug = DEBUG_TOOLS && (opts.debug ?? !!train);
-      const discover = !train && (opts.discover ?? false);
-      const kind: RunKind = train || discover ? "transactions" : (opts.kind ?? "transactions");
-      const dryRun = discover || debug || (opts.dryRun ?? settings.dryRun);
-      const runId = this.runs.start(connectionId, conn.userName, train ? "train" : discover ? "discover" : trigger, dryRun, kind);
+      const session = !!opts.session;
+      const train = DEBUG_TOOLS && !session ? opts.train : undefined;
+      const debug = DEBUG_TOOLS && !session && (opts.debug ?? !!train);
+      const discover = !train && !session && (opts.discover ?? false);
+      const kind: RunKind = train || discover || session ? "transactions" : (opts.kind ?? "transactions");
+      const dryRun = discover || debug || session || (opts.dryRun ?? settings.dryRun);
+      const runId = this.runs.start(connectionId, conn.userName, session ? "session" : train ? "train" : discover ? "discover" : trigger, dryRun, kind);
       active.runId = runId;
-      const period = train || discover ? undefined : opts.period;
-      await this.#run(runId, conn, settings, { kind, dryRun, discover, debug, train, period }, active);
+      const period = train || discover || session ? undefined : opts.period;
+      await this.#run(runId, conn, settings, { kind, dryRun, discover, debug, train, period, session }, active);
       return runId;
     } finally {
       this.#active.delete(connectionId);
@@ -377,6 +383,7 @@ export class Runner {
     const stats = emptyStats();
     const debugDir = join(this.dataDir, "debug", `run-${runId}`);
     try {
+      if (flags.session && !settings.bankSessions) throw new ProviderError("Bank sessions are turned off (Settings)");
       if (!settings.sureUrl) throw new ProviderError("Sure URL is not set: open Settings in the web UI");
       const def = PROVIDERS[conn.provider];
       if (!def) throw new ProviderError(`unknown provider ${JSON.stringify(conn.provider)}`);
@@ -402,10 +409,11 @@ export class Runner {
       }
       if (p) rlog("PERIOD: chosen for this run only (the connection's setting is unchanged)");
       if (statements) rlog("STATEMENTS: importing bank statements, not transactions");
-      if (flags.train) rlog(`TRAIN: recording recipe "${flags.train.recipe}"; nothing fetched or written`);
+      if (flags.session) rlog("BANK SESSION: logging in for a person to use the bank's site; nothing fetched or written");
+      else if (flags.train) rlog(`TRAIN: recording recipe "${flags.train.recipe}"; nothing fetched or written`);
       else if (flags.debug) rlog("DEBUG RUN: visible browser, network capture and downloads kept; nothing written to Sure");
       if (discover) rlog("DISCOVER: listing accounts only, no transactions fetched");
-      else if (dryRun) rlog("DRY RUN: nothing will be written to Sure");
+      else if (dryRun && !flags.session) rlog("DRY RUN: nothing will be written to Sure");
       const allTime = !(p && "since" in p) && days === ALL_TIME_DAYS && !maxDays;
       rlog(`${conn.provider}, ${allTime ? `all time → ${range.until}` : `${range.since} → ${range.until}`}`);
       const bank = this.#bankLock(conn.provider);
@@ -427,6 +435,11 @@ export class Runner {
         bank.release();
       }
       signal.throwIfAborted();
+      if (flags.session) {
+        this.runs.finish(runId, "success", stats);
+        rlog("done: bank session ended");
+        return;
+      }
       if (flags.train) {
         this.runs.finish(runId, "success", stats);
         rlog("done: recording saved. The steps are listed on this run's page.");
@@ -587,6 +600,10 @@ export class Runner {
     const def = PROVIDERS[conn.provider]!;
     const provider = def.create(ctx);
     try {
+      if (flags.session) {
+        await this.#session(def, provider, ctx, rlog);
+        return { txns: [], statements: [] };
+      }
       if (flags.train) {
         await this.#train(flags.train, conn, def, provider, ctx, rlog, settings.verboseLogs);
         return { txns: [], statements: [] };
@@ -633,6 +650,26 @@ export class Runner {
   async #keepStatementFiles(statements: BankStatement[], debugDir: string): Promise<void> {
     await mkdir(debugDir, { recursive: true });
     for (const st of statements) await writeFile(join(debugDir, `statement-${st.account.id}-${st.fileName}`.replace(/[^\w.-]+/g, "_")), st.data);
+  }
+
+  /** Log in, then let a person use the bank's site in the browser view until they press End session. */
+  async #session(def: ProviderDefinition, provider: BankProvider, ctx: ProviderContext, rlog: (m: string) => void): Promise<void> {
+    // Retry in the browser view logs in again and hands the site back.
+    await withRetry(async () => {
+      await provider.login();
+      rlog("logged in; the bank's site is in the browser view until End session is pressed");
+      const pages = ctx.browser.pages();
+      const page = pages[pages.length - 1] ?? (await ctx.browser.newPage());
+      try {
+        await ctx.requestBrowserHelp(page, `Logged in to ${def.label}. Use the bank's site here, then press End session.`, undefined, {
+          timeoutMs: SESSION_TIMEOUT_MS,
+          doneLabel: "End session",
+        });
+      } catch (e) {
+        if (!(e instanceof MfaTimeout)) throw e;
+        rlog(`bank session time limit (${SESSION_TIMEOUT_MS / 60_000} minutes) reached`);
+      }
+    }, rlog);
   }
 
   /** Log in (optional), then record what a person does until they press Finish recording. */

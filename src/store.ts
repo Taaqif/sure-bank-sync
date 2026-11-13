@@ -61,6 +61,8 @@ export const SettingsSchema = z.object({
   saveNetworkLog: z.boolean(),
   /** logs may include transaction details and full account numbers */
   verboseLogs: z.boolean(),
+  /** allow "Bank session": log in with a stored login and hand the live bank site to whoever uses this web UI */
+  bankSessions: z.boolean(),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
@@ -79,6 +81,7 @@ export const DEFAULT_SETTINGS: Settings = {
   dryRun: false,
   saveNetworkLog: false,
   verboseLogs: false,
+  bankSessions: false,
 };
 
 export interface User {

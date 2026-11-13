@@ -191,7 +191,7 @@ export function DashboardStatus(p: DashboardProps) {
 const REFRESH_JS = `
 const el = document.getElementById("status");
 const toasts = document.getElementById("toasts");
-const baseTitle = document.title;
+const baseTitle = document.documentElement.dataset.title || document.title;
 let prev = snapshot();
 let timer;
 
@@ -203,7 +203,7 @@ function snapshot() {
 function busy(snap) { return [...snap.values()].some((r) => r.state !== "idle"); }
 function updateTitle(snap) {
   const n = [...snap.values()].filter((r) => r.state === "needs_you").length;
-  document.title = (n ? "⚠ " + n + " action needed · " : busy(snap) ? "⟳ " : "") + baseTitle;
+  document.title = (n ? "(" + n + ") Needs you · " : busy(snap) ? "⟳ " : "") + baseTitle;
 }
 function toast(conn, r) {
   const ok = r.status === "success";
@@ -247,7 +247,7 @@ updateTitle(prev);
 schedule();`;
 
 export const DashboardPage = (p: DashboardProps & { msg?: string }) => (
-  <Layout nav="dashboard" msg={p.msg} script={REFRESH_JS} hideNeeds>
+  <Layout nav="dashboard" msg={p.msg} script={REFRESH_JS} hideNeeds ownTitle>
     <div id="status">
       <DashboardStatus {...p} />
     </div>
@@ -353,6 +353,14 @@ export const SettingsPage = (p: { s: Settings; storage?: StorageInfo; msg?: stri
         <small class="hint" style="margin-top:-10px">
           Off: logs show counts and only the last 4 digits of account numbers. On: also every transaction (date,
           amount, description) and full account numbers. Turn on only while troubleshooting.
+        </small>
+        <label class="check">
+          <input type="checkbox" name="bankSessions" checked={p.s.bankSessions} /> Bank sessions
+        </label>
+        <small class="hint" style="margin-top:-10px">
+          Adds "Open bank session" to each connection: the app logs in with the stored login and hands you the bank's
+          own site in the browser view. <strong>Anyone who can open this web UI can then use those bank accounts,
+          including moving money.</strong> Leave off unless you need it, and only turn it on when this web UI has a login.
         </small>
         <label>
           Source tag
@@ -1023,6 +1031,8 @@ export const ConnectionPage = (p: {
 
       <ConnRuns conn={p.conn} runs={p.runs} />
 
+      {p.settings.bankSessions && <BankSessionForm connectionId={p.conn.id} label={p.provider?.label ?? p.conn.provider} running={p.running} />}
+
       {ui.debugTools && <TrainForm connectionId={p.conn.id} running={p.running} canStartLoggedOut={!!p.provider?.startUrl} loginWorks={!p.provider?.unfinished} />}
 
       <h2>Edit connection</h2>
@@ -1078,6 +1088,31 @@ export const ConnectionPage = (p: {
 // --- runs ------------------------------------------------------------------
 
 /** Debug tools: record a person's steps in the bank site as a named recipe. */
+const BankSessionForm = (p: { connectionId: string; label: string; running: boolean }) => (
+  <>
+    <h2 id="session">Bank session</h2>
+    <div class="card">
+      <form
+        class="stack"
+        method="post"
+        action={`/connections/${p.connectionId}/session`}
+        onsubmit={`return confirm(${JSON.stringify(`Log in to ${p.label} and open its site in the browser view? Anything done there is real.`)})`}
+      >
+        <p class="hint" style="margin:0">
+          Log in to {p.label} with the stored login and use the bank's own site in the browser view, e.g. to check
+          something, change a setting or approve a device. Nothing is fetched or sent to Sure. It ends when you press{" "}
+          <strong>End session</strong>, or after 30 minutes.
+        </p>
+        <div>
+          <button type="submit" disabled={p.running}>
+            Open bank session
+          </button>
+        </div>
+      </form>
+    </div>
+  </>
+);
+
 const TrainForm = (p: { connectionId: string; running: boolean; canStartLoggedOut: boolean; loginWorks: boolean }) => (
   <>
     <h2 id="train">

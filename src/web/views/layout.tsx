@@ -265,16 +265,14 @@ export function NeedsYou(p: { items: NeedItem[] }) {
   );
 }
 
-/* Keeps the banner current on pages that don't reload themselves. */
+/* Keeps the banner (when the page has one) and the tab title current on pages that don't reload themselves. */
 const NEEDS_JS = `
 (() => {
   const box = document.getElementById("needs-banner");
-  if (!box) return;
-  let last = box.dataset.state || "";
+  let last = box ? box.dataset.state || "" : document.documentElement.dataset.needs || "";
   // Mark the tab title too, so a tab in the background shows it.
-  const title = document.title;
+  const title = document.documentElement.dataset.title || document.title;
   const mark = (n) => { document.title = n ? "(" + n + ") Needs you · " + title : title; };
-  try { mark(JSON.parse(last || "[]").length); } catch {}
   async function poll() {
     try {
       const r = await fetch("/api/needs", { credentials: "same-origin" });
@@ -284,6 +282,7 @@ const NEEDS_JS = `
         if (state !== last) {
           last = state;
           mark(items.length);
+          if (!box) { setTimeout(poll, document.hidden ? 3000 : 1500); return; }
           box.innerHTML = "";
           for (const n of items) {
             const div = document.createElement("div");
@@ -338,6 +337,8 @@ export function Layout(props: {
   script?: string;
   /** pages with their own "needs you" UI (dashboard, browser view) */
   hideNeeds?: boolean;
+  /** the page keeps the tab title current itself (dashboard) */
+  ownTitle?: boolean;
 }) {
   const tab = (n: Nav, href: string, label: string) => (
     <a class={`tab${props.nav === n ? " on" : ""}`} href={href}>
@@ -346,14 +347,15 @@ export function Layout(props: {
   );
   const msgIsError = props.msg?.startsWith("Error");
   const ui = useContext(UiContext);
+  const title = props.title ? `${props.title} · Bank Sync` : "Bank Sync";
   return (
     <>
       {raw("<!doctype html>")}
-      <html lang="en">
+      <html lang="en" data-title={title} data-needs={JSON.stringify(ui.needs)}>
         <head>
           <meta charset="utf-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1" />
-          <title>{props.title ? `${props.title} · Bank Sync` : "Bank Sync"}</title>
+          <title>{ui.needs.length ? `(${ui.needs.length}) Needs you · ${title}` : title}</title>
           <style dangerouslySetInnerHTML={{ __html: CSS }} />
         </head>
         <body>
@@ -391,7 +393,7 @@ export function Layout(props: {
             {props.children}
           </main>
           <script dangerouslySetInnerHTML={{ __html: FRESH_JS }} />
-          {!props.hideNeeds && <script dangerouslySetInnerHTML={{ __html: NEEDS_JS }} />}
+          {!props.ownTitle && <script dangerouslySetInnerHTML={{ __html: NEEDS_JS }} />}
           {props.script && <script dangerouslySetInnerHTML={{ __html: props.script }} />}
         </body>
       </html>
