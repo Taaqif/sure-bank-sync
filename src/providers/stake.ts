@@ -14,7 +14,7 @@
  */
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Locator, Page, Request } from "playwright";
+import type { Locator, Page, Request, Response } from "playwright";
 import type { BankAccount, BankTransaction } from "../models.js";
 import { parseTotpSecret, totp, totpSecondsLeft } from "../totp.js";
 import { AuthError, captureJson, pause, ProviderError, settle, snapshot, type DateRange, type ProviderContext, type ProviderDefinition } from "./base.js";
@@ -64,10 +64,13 @@ export const stake: ProviderDefinition = {
 class StakeProvider {
   #token: string | null = null;
   #api = DEFAULT_API;
+  /** Tokens the API has already answered 401/403 for. Stake keeps sending them. */
+  #dead = new Set<string>();
 
   constructor(private readonly ctx: ProviderContext) {
     // The web app sends its session token on every API call; keep the latest.
     ctx.browser.on("request", (r: Request) => this.#sniff(r));
+    ctx.browser.on("response", (r: Response) => this.#watch(r));
     if (ctx.debug) captureJson(ctx, /hellostake\.com$/);
   }
 
@@ -76,12 +79,36 @@ class StakeProvider {
       const url = new URL(r.url());
       if (!url.host.endsWith("hellostake.com")) return;
       const token = r.headers()[TOKEN_HEADER];
-      if (!token) return;
+      if (!token || this.#dead.has(token)) return;
       this.#token = token;
       this.#api = url.origin;
     } catch {
       // odd URL; ignore
     }
+  }
+
+  /** A 401/403 is Stake's "expired session" signal; it then redirects to login. */
+  #watch(r: Response): void {
+    try {
+      const url = new URL(r.url());
+      if (!url.host.endsWith("hellostake.com")) return;
+      const token = r.request().headers()[TOKEN_HEADER];
+      if (!token) return;
+      const status = r.status();
+      if (status === 401 || status === 403) this.#reject(token);
+    } catch {
+      // request already gone
+    }
+  }
+
+  #reject(token: string): void {
+    this.#dead.add(token);
+    if (this.#token === token) this.#token = null;
+  }
+
+  #dropToken(): void {
+    if (this.#token) this.#dead.add(this.#token);
+    this.#token = null;
   }
 
   async login(): Promise<void> {
@@ -95,13 +122,19 @@ class StakeProvider {
     const page = ctx.browser.pages()[0] ?? (await ctx.browser.newPage());
     await page.goto(APP_URL, { waitUntil: "domcontentloaded" });
 
-    // A remembered session sends its token straight away.
+    // A remembered session sends its token straight away, and so does an
+    // expired one. Stake answers 401 ("Expired session token") and redirects
+    // to /auth/login. The token only counts once the API accepts it.
     const first = await this.#waitFor(page, 30_000, [EMAIL, PASSWORD]);
     if (first === "token") {
-      ctx.log("stake: already logged in");
-      return;
-    }
-    if (first === "timeout") {
+      if (await this.#sessionHolds(page)) {
+        ctx.log("stake: already logged in");
+        return;
+      }
+      ctx.log("stake: saved session expired, logging in again");
+      this.#dropToken();
+      await this.#openLogin(page);
+    } else if (first === "timeout") {
       await snapshot(ctx, "stake-no-login-form");
       throw new ProviderError("Stake: the login page didn't show a login form");
     }
@@ -145,6 +178,46 @@ class StakeProvider {
     }
     ctx.log("stake: logged in");
     await settle(page);
+  }
+
+  /**
+   * The saved token is only good if Stake still accepts it. A 401 here is the
+   * expired session from the log: the header was present, the API refused it.
+   * A network blip leaves the token in place so a working session isn't thrown away.
+   */
+  async #sessionHolds(page: Page): Promise<boolean> {
+    const token = this.#token;
+    if (!token || this.#dead.has(token)) return false;
+    try {
+      const res = await this.ctx.browser.request.get(`${this.#api}/api/user/product/config`, {
+        headers: { [TOKEN_HEADER]: token, Accept: "application/json" },
+        timeout: 20_000,
+      });
+      const status = res.status();
+      if (status === 401 || status === 403) {
+        this.#reject(token);
+        return false;
+      }
+      if (status >= 200 && status < 300 && this.#token === token && !this.#dead.has(token)) return true;
+    } catch (e) {
+      this.ctx.log(`stake: couldn't check the saved session (${(e as Error).message.split("\n")[0]})`);
+    }
+    // The page's own call can 401 and bounce to login while this check is in flight.
+    if (this.#dead.has(token) || this.#token !== token || /\/auth\/login\b/.test(page.url())) {
+      this.#reject(token);
+      return false;
+    }
+    return true;
+  }
+
+  /** After a rejected session, land on the login page (Stake usually redirects itself). */
+  async #openLogin(page: Page): Promise<void> {
+    if (/\/auth\/login\b/.test(page.url())) return;
+    const arrived = await page
+      .waitForURL(/\/auth\/login/, { timeout: 10_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!arrived) await page.goto(new URL("/auth/login", APP_URL).toString(), { waitUntil: "domcontentloaded" });
   }
 
   /** Wait until the app has a session token, or one of `selectors` is visible. */
