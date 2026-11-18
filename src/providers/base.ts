@@ -103,13 +103,27 @@ export function redactHtml(html: string, credentials: Record<string, string>): s
   return out;
 }
 
+/**
+ * page.content() throws while a navigation is in flight (Stake does this when
+ * a 401 bounces the app to login). Wait that navigation out and read again.
+ */
+async function pageHtml(page: Page): Promise<string> {
+  try {
+    return await page.content();
+  } catch (e) {
+    if (!/navigat/i.test((e as Error).message)) throw e;
+    await page.waitForLoadState("domcontentloaded", { timeout: 5_000 }).catch(() => {});
+    return page.content();
+  }
+}
+
 /** Save screenshot + HTML of every open page. Call liberally when debugging selectors. */
 export async function snapshot(ctx: ProviderContext, name: string): Promise<void> {
   await mkdir(ctx.debugDir, { recursive: true });
   for (const [i, page] of ctx.browser.pages().entries()) {
     // HTML first: it's cheap and still works when a busy page can't be screenshotted.
     try {
-      await writeFile(join(ctx.debugDir, `${name}-${i}.html`), redactHtml(await page.content(), ctx.credentials));
+      await writeFile(join(ctx.debugDir, `${name}-${i}.html`), redactHtml(await pageHtml(page), ctx.credentials));
     } catch (e) {
       ctx.log(`snapshot ${name}: couldn't save the page: ${(e as Error).message.split("\n")[0]}`);
     }
