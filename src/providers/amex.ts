@@ -95,6 +95,17 @@ const TXN_API_PATH = "/api/servicing/v1/financials/transactions";
 const API_PAGE = 1000;
 
 /**
+ * Date Range on /activity/search. Each group holds Day / Month / Year boxes and
+ * a hidden YYYY-MM-DD input (`*-start-date` / `*-end-date`). Find the group
+ * from that input. A role query for "Start date" does not see it while any
+ * ancestor is aria-hidden.
+ */
+export function amexDateRange(page: Page): { start: Locator; end: Locator } {
+  const group = (suffix: string) => page.locator(`input[name$="${suffix}"]`).first().locator('xpath=ancestor::*[@role="group"][1]');
+  return { start: group("-start-date"), end: group("-end-date") };
+}
+
+/**
  * Type a YYYY-MM-DD date into one of the search page's Day / Month / Year
  * groups, then check the page took it (it keeps the result in a hidden
  * YYYY-MM-DD input).
@@ -103,7 +114,8 @@ async function typeAmexDate(page: Page, group: Locator, hidden: string, date: st
   const [y, m, d] = date.split("-") as [string, string, string];
   for (let attempt = 1; attempt <= 3; attempt++) {
     for (const [label, value] of [["Day", d], ["Month", m], ["Year", y]] as const) {
-      const box = group.getByLabel(label, { exact: true });
+      // aria-label, not getByLabel: the label query also skips aria-hidden subtrees.
+      const box = group.locator(`input[aria-label="${label}"]`);
       await box.click();
       await page.keyboard.press("ControlOrMeta+A");
       await box.pressSequentially(value, { delay: 60 });
@@ -414,16 +426,22 @@ export const amex: ProviderDefinition = {
         // JSON API; read that response rather than a downloaded file.
         ctx.log("amex: opening activity search");
         await page.goto(SEARCH_URL, { waitUntil: "domcontentloaded" });
-        const start = page.getByRole("group", { name: "Start date", exact: true });
-        const end = page.getByRole("group", { name: "End date", exact: true });
-        await start.waitFor({ timeout: 45_000 }).catch(async () => {
+        const { start, end } = amexDateRange(page);
+        const ready = await start.locator('input[aria-label="Day"]').waitFor({ timeout: 45_000 }).then(
+          () => true,
+          () => false,
+        );
+        if (!ready) {
           await snapshot(ctx, "amex-search");
           const text = await page.locator("body").innerText().catch(() => "");
           if (UNAVAILABLE_TEXT.test(text)) {
             throw new ProviderError("Amex says \"Your information is unavailable at this time\" (a problem on Amex's side; the next run usually works)");
           }
-          throw new ProviderError("Amex: no date range on the activity search page");
-        });
+          if ((await page.locator('input[name$="-start-date"]').count()) === 0) {
+            throw new ProviderError("Amex: no date range on the activity search page");
+          }
+          ctx.log("amex: date range is on the page");
+        }
         await settle(page);
 
         ctx.log(`amex: searching ${range.since} to ${range.until}`);

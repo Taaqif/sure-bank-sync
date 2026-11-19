@@ -22,6 +22,40 @@ describe("settle", () => {
   }, 30_000);
 });
 
+describe("amex activity search date range", () => {
+  // The live search page: hidden ISO dates inside Start/End groups, and the
+  // same groups under an aria-hidden ancestor (the page does this for menus).
+  const fields = `
+    <div role="group" aria-label="Start date">
+      <input name="undefined-start-date" type="hidden" value="2026-10-19">
+      <input aria-label="Day" value="19"><input aria-label="Month" value="10"><input aria-label="Year" value="2026">
+    </div>
+    <div role="group" aria-label="End date">
+      <input name="undefined-end-date" type="hidden" value="2026-11-19">
+      <input aria-label="Day" value="19"><input aria-label="Month" value="11"><input aria-label="Year" value="2026">
+    </div>`;
+
+  it("reads the hidden dates from the groups, including under aria-hidden", async () => {
+    const { amexDateRange } = await import("../src/providers/amex.js");
+    const browser = await chromium.launch();
+    try {
+      const page = await browser.newPage();
+      await page.setContent(`<main>${fields}</main><div aria-hidden="true">${fields}</div>`);
+      expect(await page.getByRole("group", { name: "Start date", exact: true }).count()).toBe(1);
+      const { start, end } = amexDateRange(page);
+      expect(await start.locator('input[name$="-start-date"]').inputValue()).toBe("2026-10-19");
+      expect(await end.locator('input[name$="-end-date"]').inputValue()).toBe("2026-11-19");
+      expect(await start.locator('input[aria-label="Day"]').inputValue()).toBe("19");
+
+      await page.locator("main").evaluate((el) => el.setAttribute("aria-hidden", "true"));
+      expect(await page.getByRole("group", { name: "Start date", exact: true }).count()).toBe(0);
+      expect(await amexDateRange(page).start.locator('input[name$="-start-date"]').inputValue()).toBe("2026-10-19");
+    } finally {
+      await browser.close();
+    }
+  }, 30_000);
+});
+
 describe("macquarie What's new popup", () => {
   it("closes it (over two slides) before clicking what's underneath", async () => {
     const { dismissWhatsNew } = await import("../src/providers/macquarie.js");
